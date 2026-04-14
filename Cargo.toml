@@ -1,0 +1,10 @@
+[package]
+name = "telegramka-rs"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+members = [".", "api", "entity", "macros", "migration"]
+
+[dependencies]
+telegramka-api = { path = "api" }
