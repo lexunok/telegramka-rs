@@ -1,8 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{
-    FnArg, Ident, ItemFn, Pat, Type, parse_macro_input, punctuated::Punctuated, token::Comma,
-};
+use syn::{FnArg, Ident, ItemFn, Pat, Type, parse_macro_input};
 
 fn find_claims_arg(input: &mut ItemFn) -> syn::Result<(Ident, Box<Type>)> {
     let claims_arg = input.sig.inputs.iter_mut().find_map(|arg| {

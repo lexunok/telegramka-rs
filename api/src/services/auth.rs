@@ -1,93 +1,132 @@
 use crate::{
     AppState,
-    config::GLOBAL_CONFIG,
-    dtos::auth::{LoginPayload, RegisterPayload},
+    dtos::auth::{
+        CheckEmailRequest, CheckEmailResponse, LoginRequest, RefreshRequest, RefreshResponse,
+        RegisterRequest, RegisterResponse, VerificationInfo, VerifyCodeRequest, VerifyCodeResponse,
+    },
     error::AppError,
-    utils::security::{Claims, TokenType, hash_password, verify_password},
+    utils::{
+        security::{TokenPair, build_token_pair},
+        smtp::send_auth_code,
+    },
 };
-use axum_extra::extract::CookieJar;
-use chrono::Local;
-use entity::{
-    invitation::{self, Entity as Invitation},
-    users::{self, Entity as User},
-};
-use jsonwebtoken::{Validation, decode};
+use argon2::password_hash::rand_core::{OsRng, RngCore};
+use chrono::{Duration, Utc};
+use entity::{prelude::*, users, verification_codes};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
-    TransactionTrait, prelude::Uuid,
+    QueryOrder, prelude::Expr,
 };
-use serde_json::json;
-use validator::Validate;
 
 pub struct AuthService;
 
 impl AuthService {
-    pub async fn refresh(jar: CookieJar) -> Result<Claims, AppError> {
-        let refresh_cookie = jar.get("refresh_token").ok_or(AppError::WrongCredentials)?;
+    const CODE_TTL_MINUTES: i64 = 10;
+    const CODE_LENGTH: usize = 6;
 
-        let refresh_token = refresh_cookie.value();
+    pub async fn login(state: &AppState, email: String) -> Result<(), AppError> {
+        let email = email.to_lowercase();
+        let _ = Users::find_by_email(&email)
+            .one(&state.conn)
+            .await?
+            .ok_or(AppError::NotFound)?;
 
-        let token_data = decode::<Claims>(
-            refresh_token,
-            &GLOBAL_CONFIG.decoding_key,
-            &Validation::default(),
-        )
-        .map_err(|_| AppError::InvalidToken)?;
+        Self::issue_verification_code(state, email).await?;
 
-        if token_data.claims.token_type != TokenType::Refresh {
-            return Err(AppError::InvalidToken);
-        }
-
-        Ok(token_data.claims)
+        Ok(())
     }
 
-    pub async fn login(state: &AppState, payload: LoginPayload) -> Result<users::Model, AppError> {
-        payload.validate()?;
+    pub async fn register(state: &AppState, payload: RegisterRequest) -> Result<(), AppError> {
+        let user = users::ActiveModel {
+            email: Set(payload.email.to_lowercase()),
+            name: Set(payload.name),
+            nickname: Set(payload.nickname),
+            ..Default::default()
+        };
 
-        let user = User::find_by_email(payload.email.to_lowercase())
+        let user = user.insert(&state.conn).await?;
+
+        Self::issue_verification_code(state, user.email).await?;
+        Ok(())
+    }
+
+    pub async fn verify_code(
+        state: &AppState,
+        payload: VerifyCodeRequest,
+    ) -> Result<VerifyCodeResponse, AppError> {
+        let now = Utc::now();
+
+        let verification = VerificationCodes::find()
+            .filter(verification_codes::Column::Email.eq(payload.email.to_lowercase().clone()))
+            .filter(verification_codes::Column::Code.eq(payload.code))
+            .filter(verification_codes::Column::ExpiresAt.gt(now))
+            .order_by_desc(verification_codes::Column::CreatedAt)
             .one(&state.conn)
             .await?
             .ok_or(AppError::WrongCredentials)?;
 
-        if !verify_password(&user.password, &payload.password) {
-            return Err(AppError::WrongCredentials);
-        }
+        let mut verification_active = verification.clone().into_active_model();
+        verification_active.attempt_count = Set(verification.attempt_count + 1);
+        verification_active.used_at = Set(Some(now.into()));
+        verification_active.update(state.conn()).await?;
 
-        Ok(user)
-    }
-
-    pub async fn register_user(
-        state: &AppState,
-        invitation_id: Uuid,
-        payload: RegisterPayload,
-    ) -> Result<users::Model, AppError> {
-        payload.validate()?;
-
-        let txn = state.conn.begin().await?;
-
-        let invitation = Invitation::find_by_id(invitation_id)
-            .filter(invitation::Column::ExpiryDate.gt(Local::now()))
-            .one(&txn)
+        let user = User::find()
+            .filter(users::Column::Email.eq(email.clone()))
+            .one(state.conn())
             .await?
             .ok_or(AppError::NotFound)?;
 
-        let mut user =
-            users::ActiveModel::from_json(json!(payload)).map_err(|_| AppError::BadRequest)?;
+        let tokens = Self::build_tokens(&user)?;
 
-        user.email = Set(invitation.email.to_lowercase());
-        user.password = Set(hash_password(&payload.password)?);
-        user.roles = Set(invitation.roles.clone());
+        Ok(VerifyCodeResponse {
+            access_token: tokens.access_token,
+            refresh_token: tokens.refresh_token,
+            expires_in: tokens.expires_in,
+            user: Self::map_user(&user),
+        })
+    }
 
-        let user = user.insert(&txn).await?;
+    pub async fn refresh(
+        state: &AppState,
+        payload: RefreshRequest,
+    ) -> Result<RefreshResponse, AppError> {
+        let claims = decode_refresh_token(&payload.refresh_token)?;
+        let user = User::find()
+            .filter(users::Column::Id.eq(claims.sub))
+            .one(state.conn())
+            .await?
+            .ok_or(AppError::NotFound)?;
 
-        let mut invitation = invitation.into_active_model();
+        let tokens = Self::build_tokens(&user)?;
 
-        invitation.expiry_date = Set(Local::now().into());
+        Ok(RefreshResponse {
+            access_token: tokens.access_token,
+            refresh_token: tokens.refresh_token,
+            expires_in: tokens.expires_in,
+        })
+    }
 
-        invitation.update(&txn).await?;
+    async fn issue_verification_code(state: &AppState, email: String) -> Result<(), AppError> {
+        let mut rng = OsRng;
+        let random_u32 = rng.next_u32();
+        let code = (100_000 + (random_u32 % 900_000)).to_string();
 
-        txn.commit().await?;
+        let now = Utc::now();
+        let expires_at = now + Duration::minutes(Self::CODE_TTL_MINUTES);
 
-        Ok(user)
+        let verification = verification_codes::ActiveModel {
+            email: Set(email.clone()),
+            code: Set(code.clone()),
+            expires_at: Set(expires_at.into()),
+            ..Default::default()
+        };
+
+        verification.insert(&state.conn).await?;
+
+        send_auth_code(code, email)
+            .await
+            .map_err(|_| AppError::InternalServerError)?;
+
+        Ok(())
     }
 }

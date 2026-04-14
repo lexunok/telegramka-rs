@@ -3,13 +3,7 @@ use std::{env, sync::LazyLock};
 
 pub static GLOBAL_CONFIG: LazyLock<Config> = LazyLock::new(|| {
     let port = env::var("PORT").unwrap_or("3000".to_string());
-
-    let admin_username = env::var("ADMIN_USERNAME").expect("ADMIN_USERNAME must be set");
-    let admin_password = env::var("ADMIN_PASSWORD").expect("ADMIN_PASSWORD must be set");
-
-    let client_url = env::var("CLIENT_URL").expect("CLIENT_URL must be set");
     let db_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    let redis_url = env::var("REDIS_URL").expect("REDIS_URL must be set");
 
     let smtp_host = env::var("SMTP_HOST").expect("SMTP_HOST must be set");
     let smtp_from = env::var("SMTP_FROM").expect("SMTP_FROM must be set");
@@ -23,11 +17,7 @@ pub static GLOBAL_CONFIG: LazyLock<Config> = LazyLock::new(|| {
 
     Config {
         port,
-        admin_username,
-        admin_password,
-        client_url,
         db_url,
-        redis_url,
         smtp_host,
         smtp_from,
         smtp_user,
@@ -40,11 +30,7 @@ pub static GLOBAL_CONFIG: LazyLock<Config> = LazyLock::new(|| {
 
 pub struct Config {
     pub port: String,
-    pub admin_username: String,
-    pub admin_password: String,
-    pub client_url: String,
     pub db_url: String,
-    pub redis_url: String,
     pub smtp_host: String,
     pub smtp_from: String,
     pub smtp_user: String,

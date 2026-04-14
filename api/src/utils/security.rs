@@ -3,14 +3,12 @@ use argon2::{
     Argon2,
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
-use axum::{extract::FromRequestParts, http::request::Parts};
-use axum_extra::extract::{
-    CookieJar,
-    cookie::{Cookie, SameSite},
+use axum::{
+    extract::FromRequestParts,
+    http::{header::AUTHORIZATION, request::Parts},
 };
 use chrono::{Duration, Utc};
-use entity::role::Role;
-use jsonwebtoken::{Header, Validation, decode, encode};
+use jsonwebtoken::{Algorithm, Header, Validation, decode, encode};
 use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 
@@ -24,12 +22,18 @@ pub enum TokenType {
 pub struct Claims {
     pub sub: Uuid,
     pub email: String,
-    pub first_name: String,
-    pub last_name: String,
+    pub name: String,
+    pub nickname: String,
     pub exp: usize,
     pub iat: usize,
     pub token_type: TokenType,
-    pub roles: Vec<Role>,
+}
+
+#[derive(Debug)]
+pub struct TokenPair {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_in: usize,
 }
 
 impl<S> FromRequestParts<S> for Claims
@@ -39,18 +43,17 @@ where
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        let jar = CookieJar::from_headers(&parts.headers);
-
-        let access_token = jar
-            .get("access_token")
-            .ok_or(AppError::WrongCredentials)?
-            .value()
-            .to_string();
+        let token = parts
+            .headers
+            .get(AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|header| header.strip_prefix("Bearer ").map(str::to_string))
+            .ok_or(AppError::WrongCredentials)?;
 
         let token_data = decode::<Claims>(
-            &access_token,
+            &token,
             &GLOBAL_CONFIG.decoding_key,
-            &Validation::default(),
+            &Validation::new(Algorithm::HS256),
         )
         .map_err(|_| AppError::InvalidToken)?;
 
@@ -62,64 +65,53 @@ where
     }
 }
 
-pub fn generate_tokens(
-    sub: Uuid,
+pub fn build_token_pair(
+    id: Uuid,
+    name: String,
     email: String,
-    first_name: String,
-    last_name: String,
-    roles: Vec<Role>,
-) -> Result<CookieJar, AppError> {
+    nickname: String,
+) -> Result<TokenPair, AppError> {
     let now = Utc::now();
     let iat = now.timestamp() as usize;
-    let exp = (now + Duration::minutes(15)).timestamp() as usize;
 
-    let claims = Claims {
-        sub: sub.clone(),
-        email: email.clone(),
-        first_name: first_name.clone(),
-        last_name: last_name.clone(),
-        iat,
-        exp,
-        token_type: TokenType::Access,
-        roles: roles.clone(),
-    };
+    let access_exp = (now + Duration::minutes(15)).timestamp() as usize;
+    let refresh_exp = (now + Duration::days(7)).timestamp() as usize;
 
-    let access_token = encode(&Header::default(), &claims, &GLOBAL_CONFIG.encoding_key)
-        .map_err(|_| AppError::TokenCreation)?;
-
-    let exp = (now + Duration::days(7)).timestamp() as usize;
-
-    let claims = Claims {
-        sub,
+    let access_claims = Claims {
+        sub: id,
         email,
-        first_name,
-        last_name,
+        name,
+        nickname,
+        exp: access_exp,
         iat,
-        exp,
-        token_type: TokenType::Refresh,
-        roles,
+        token_type: TokenType::Access,
     };
 
-    let refresh_token = encode(&Header::default(), &claims, &GLOBAL_CONFIG.encoding_key)
-        .map_err(|_| AppError::TokenCreation)?;
+    let refresh_claims = Claims {
+        exp: refresh_exp,
+        token_type: TokenType::Refresh,
+        ..access_claims.clone()
+    };
 
-    let is_secure: bool = !cfg!(debug_assertions);
+    let access_token = encode(
+        &Header::new(Algorithm::HS256),
+        &access_claims,
+        &GLOBAL_CONFIG.encoding_key,
+    )
+    .map_err(|_| AppError::TokenCreation)?;
 
-    let access_cookie = Cookie::build(("access_token", access_token))
-        .path("/")
-        .http_only(true)
-        .same_site(SameSite::Lax)
-        .secure(is_secure)
-        .max_age(time::Duration::minutes(30));
+    let refresh_token = encode(
+        &Header::new(Algorithm::HS256),
+        &refresh_claims,
+        &GLOBAL_CONFIG.encoding_key,
+    )
+    .map_err(|_| AppError::TokenCreation)?;
 
-    let refresh_cookie = Cookie::build(("refresh_token", refresh_token))
-        .path("/")
-        .http_only(true)
-        .same_site(SameSite::Lax)
-        .secure(is_secure)
-        .max_age(time::Duration::days(30));
-
-    Ok(CookieJar::new().add(access_cookie).add(refresh_cookie))
+    Ok(TokenPair {
+        access_token,
+        refresh_token,
+        expires_in: access_exp,
+    })
 }
 
 pub fn hash_password(password: &str) -> Result<String, AppError> {

@@ -1,36 +1,36 @@
-// use sea_orm::prelude::Uuid;
-// use serde::{Deserialize, Serialize};
-// use validator::Validate;
+use crate::dtos::users::UserDto;
+use macros::IntoDataResponse;
+use serde::{Deserialize, Serialize};
 
-// #[derive(Debug, Deserialize, Validate)]
-// pub struct LoginPayload {
-//     #[validate(email(message = "Некорректный формат email"))]
-//     pub email: String,
-//     #[validate(length(min = 8, message = "Пароль должен быть не менее 8 символов"))]
-//     pub password: String,
-// }
-// #[derive(Debug, Deserialize, Serialize, Validate)]
-// pub struct RegisterPayload {
-//     #[validate(email(message = "Некорректный формат email"))]
-//     pub email: String,
-//     #[validate(length(min = 8, message = "Пароль должен быть не менее 8 символов"))]
-//     pub password: String,
-//     pub last_name: String,
-//     pub first_name: String,
-//     pub study_group: Option<String>,
-//     pub telephone: Option<String>,
-// }
-// #[derive(Debug, Deserialize, Validate)]
-// pub struct PasswordResetPayload {
-//     pub id: Uuid,
-//     #[validate(length(equal = 6, message = "Код должен состоять из 6 цифр"))]
-//     pub code: String,
-//     #[validate(length(min = 8, message = "Пароль должен быть не менее 8 символов"))]
-//     pub password: String,
-// }
-// #[derive(Debug, Deserialize, Validate)]
-// pub struct EmailResetPayload {
-//     pub id: Uuid,
-//     #[validate(length(equal = 6, message = "Код должен состоять из 6 цифр"))]
-//     pub code: String,
-// }
+#[derive(Debug, Deserialize)]
+pub struct RegisterRequest {
+    pub name: String,
+    pub email: String,
+    pub nickname: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct VerifyCodeRequest {
+    pub email: String,
+    pub code: String,
+}
+
+#[derive(IntoDataResponse, Debug, Serialize)]
+pub struct VerifyCodeResponse {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_in: usize,
+    pub user: UserDto,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RefreshRequest {
+    pub refresh_token: String,
+}
+
+#[derive(IntoDataResponse, Debug, Serialize)]
+pub struct RefreshResponse {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_in: usize,
+}

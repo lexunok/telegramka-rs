@@ -42,12 +42,6 @@ pub enum AppError {
         sea_orm::DbErr,
     ),
 
-    #[error("An error occurred with Redis")]
-    RedisErr(
-        #[from]
-        #[source]
-        redis::RedisError,
-    ),
 }
 
 impl IntoResponse for AppError {
@@ -88,13 +82,6 @@ impl IntoResponse for AppError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "A database error occurred".to_string(),
-                )
-            }
-            AppError::RedisErr(e) => {
-                tracing::error!("Redis source error: {:?}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "An internal service error occurred".to_string(),
                 )
             }
         };

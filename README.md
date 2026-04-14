@@ -13,10 +13,10 @@
 # Запуск PostgreSQL
 docker run -d \
   --name hits \
-  -e POSTGRES_DB=hits \
+  -e POSTGRES_DB=telegramka \
   -e POSTGRES_USER=lexunok \
   -e POSTGRES_PASSWORD=password \
-  -p 5434:5432 \
+  -p 5432:5432 \
   postgres:16
 
 # Запуск Redis
@@ -31,10 +31,10 @@ docker run -d \
 # Запуск PostgreSQL
 podman run -d \
   --name hits \
-  -e POSTGRES_DB=hits \
+  -e POSTGRES_DB=telegramka \
   -e POSTGRES_USER=lexunok \
   -e POSTGRES_PASSWORD=password \
-  -p 5434:5432 \
+  -p 5432:5432 \
   docker.io/postgres:16
 
 # Запуск Redis
