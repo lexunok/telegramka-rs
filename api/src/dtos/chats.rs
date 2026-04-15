@@ -1,11 +1,6 @@
 use chrono::{DateTime, Utc};
 use sea_orm::{FromQueryResult, prelude::Uuid};
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Deserialize)]
-pub struct CreateChatRequest {
-    pub nickname: String,
-}
+use serde::Serialize;
 
 #[derive(Debug, Serialize, FromQueryResult)]
 pub struct ChatResponse {

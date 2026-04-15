@@ -3,7 +3,7 @@ use macros::IntoDataResponse;
 use sea_orm::{FromQueryResult, prelude::Uuid};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, FromQueryResult, IntoDataResponse)]
+#[derive(Debug, Serialize, FromQueryResult, Deserialize, Clone, IntoDataResponse)]
 pub struct MessageDto {
     pub id: Uuid,
     pub chat_id: Uuid,
@@ -20,4 +20,13 @@ pub struct MessageQuery {
 #[derive(Debug, Deserialize)]
 pub struct SendMessageRequest {
     pub text: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum WsEvent {
+    NewMessage {
+        recipients: Vec<Uuid>,
+        message: MessageDto,
+    },
+    Typing,
 }

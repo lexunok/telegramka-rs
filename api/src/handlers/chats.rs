@@ -1,18 +1,17 @@
 use crate::{
     AppState,
     dtos::{
-        chats::{ChatResponse, CreateChatRequest},
+        chats::ChatResponse,
         messages::{MessageDto, MessageQuery, SendMessageRequest},
     },
     error::AppError,
-    services::{chats::ChatService},
+    services::chats::ChatService,
     utils::security::Claims,
 };
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
-    response::IntoResponse,
-    routing::{get, post},
+    routing::get,
 };
 use sea_orm::prelude::Uuid;
 
@@ -22,10 +21,7 @@ pub fn chats_router() -> Router<AppState> {
         .route("/:chat_id/messages", get(list_messages).post(send_message))
 }
 
-async fn list_chats(
-    State(state): State<AppState>,
-    claims: Claims,
-) -> Json<Vec<ChatResponse>> {
+async fn list_chats(State(state): State<AppState>, claims: Claims) -> Json<Vec<ChatResponse>> {
     let response = ChatService::list_chats(&state, claims.sub).await;
     Json(response)
 }
@@ -34,7 +30,7 @@ async fn list_messages(
     State(state): State<AppState>,
     claims: Claims,
     Path(chat_id): Path<Uuid>,
-    Query(params): Query<MessageQuery>
+    Query(params): Query<MessageQuery>,
 ) -> Json<Vec<MessageDto>> {
     let response = ChatService::list_messages(&state, claims.sub, chat_id, params).await;
     Json(response)

@@ -7,7 +7,7 @@ edition = "2024"
 entity = { path = "../entity" }
 migration = { path = "../migration" }
 macros = { path = "../macros" }
-axum = { version = "0.8.7", features = ["macros", "multipart"] }
+axum = { version = "0.8.7", features = ["macros", "multipart", "ws"] }
 serde = { version = "1.0.228", features = ["derive"] }
 tokio = { version = "1.48.0", features = ["full"] }
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
@@ -27,6 +27,8 @@ validator = { version = "0.20.0", features = ["derive"] }
 tower-http = { version = "0.6.0", features = ["cors", "fs"] }
 image = "0.25.1"
 itertools = "0.14.0"
+futures-util = "0.3.32"
+
 
 [dependencies.sea-orm]
 version = "2.0.0-rc.37"

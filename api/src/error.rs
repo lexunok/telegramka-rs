@@ -41,7 +41,6 @@ pub enum AppError {
         #[source]
         sea_orm::DbErr,
     ),
-
 }
 
 impl IntoResponse for AppError {

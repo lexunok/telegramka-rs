@@ -1,12 +1,14 @@
 use crate::{
     AppState,
-    dtos::{auth::{
-        RefreshRequest, RefreshResponse,
-        RegisterRequest, VerifyCodeRequest, VerifyCodeResponse,
-    }, users::UserDto},
+    dtos::{
+        auth::{
+            RefreshRequest, RefreshResponse, RegisterRequest, VerifyCodeRequest, VerifyCodeResponse,
+        },
+        users::UserDto,
+    },
     error::AppError,
     utils::{
-        security::{build_token_pair, decode_refresh_token, verify_password},
+        security::{build_token_pair, decode_refresh_token, hash_password, verify_password},
         smtp::send_auth_code,
     },
 };
@@ -22,7 +24,6 @@ pub struct AuthService;
 
 impl AuthService {
     const CODE_TTL_MINUTES: i64 = 10;
-    const CODE_LENGTH: usize = 6;
 
     pub async fn login(state: &AppState, email: String) -> Result<(), AppError> {
         let email = email.to_lowercase();
@@ -69,7 +70,7 @@ impl AuthService {
             let attempt_count = verification.attempt_count;
             let mut verification = verification.into_active_model();
             verification.attempt_count = Set(attempt_count + 1);
-            verification.update(&state.conn).await?;   
+            verification.update(&state.conn).await?;
             return Err(AppError::Custom("Неправильно введен код!".to_string()));
         }
 
@@ -80,7 +81,12 @@ impl AuthService {
             .await?
             .ok_or(AppError::NotFound)?;
 
-        let tokens = build_token_pair(user.id, user.name.clone(), user.email.clone(), user.nickname.clone())?;
+        let tokens = build_token_pair(
+            user.id,
+            user.name.clone(),
+            user.email.clone(),
+            user.nickname.clone(),
+        )?;
 
         Ok(VerifyCodeResponse {
             access_token: tokens.access_token,
@@ -119,7 +125,7 @@ impl AuthService {
 
         let verification = verification_codes::ActiveModel {
             email: Set(email.clone()),
-            code: Set(code.clone()),
+            code: Set(hash_password(&code)?),
             expires_at: Set(expires_at.into()),
             ..Default::default()
         };
