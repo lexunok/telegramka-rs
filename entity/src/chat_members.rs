@@ -11,8 +11,6 @@ pub struct Model {
     pub chat_id: Uuid,
     #[sea_orm(primary_key, auto_increment = false)]
     pub user_id: Uuid,
-    pub unread_count: i32,
-    pub last_read_message_id: Option<Uuid>,
     pub last_read_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,
     #[sea_orm(

@@ -1,248 +1,194 @@
 use crate::{
-    AppState,
-    dtos::chats::{ChatCreateResponse, ChatListResponse, ChatPreview, ChatReadResponse},
-    error::AppError,
+    AppState, dtos::{chats::ChatResponse, messages::{MessageDto, MessageQuery}}, error::AppError,
 };
 use chrono::Utc;
-use entity::{
-    chat_members::{self, ActiveModel as ChatMemberModel, Entity as ChatMember},
-    chats::{self, ActiveModel as ChatModel, Entity as Chat},
-    users::{self, Entity as User},
+use entity::{chat_members, chats, messages, prelude::*, users};
+use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, ExprTrait, JoinType, QueryFilter, QueryOrder, QuerySelect, QueryTrait, RelationTrait, prelude::{Uuid, *}, sea_query::Query
 };
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait,
-    IntoActiveModel, QueryFilter, QueryOrder,
-};
-use uuid::Uuid;
 
 pub struct ChatService;
 
 impl ChatService {
     pub async fn list_chats(
         state: &AppState,
-        user_id: &str,
-        limit: Option<u32>,
-    ) -> Result<ChatListResponse, AppError> {
-        let members = ChatMember::find()
-            .filter(chat_members::Column::UserId.eq(user_id.to_owned()))
-            .order_by_desc(chat_members::Column::CreatedAt)
-            .all(state.conn())
-            .await?;
+        user_id: Uuid,
+    ) -> Vec<ChatResponse> {
+        let last_message_subquery = Messages::find()
+            .select_only()
+            .column(messages::Column::Text)
+            .filter(Expr::col((Messages, messages::Column::ChatId)).equals((Chats, chats::Column::Id)))
+            .order_by_desc(messages::Column::CreatedAt)
+            .limit(1)
+            .into_query();
 
-        let mut items = Vec::with_capacity(members.len());
-        for member in members {
-            if let Some(chat) = Chat::find_by_id(member.chat_id.clone())
-                .one(state.conn())
-                .await?
-            {
-                items.push(Self::build_preview_for_user(state.conn(), chat, user_id).await?);
-            }
-        }
+        let last_message_time_subquery = Messages::find()
+            .select_only()
+            .column(messages::Column::CreatedAt)
+            .filter(Expr::col((Messages, messages::Column::ChatId)).equals((Chats, chats::Column::Id)))
+            .order_by_desc(messages::Column::CreatedAt)
+            .limit(1)
+            .into_query();
 
-        if let Some(limit) = limit {
-            items.truncate(limit as usize);
-        }
+        let unread_subquery = Query::select()
+            .expr(Expr::col(messages::Column::Id).count())
+            .from(Messages)
+            .and_where(
+                Expr::col((Messages, messages::Column::ChatId))
+                    .equals((Chats, chats::Column::Id))
+            )
+            .and_where(
+                Expr::cust(
+                    "chat_members.last_read_at IS NULL OR messages.created_at > chat_members.last_read_at"
+                )
+            )
+            .to_owned();
 
-        Ok(ChatListResponse {
-            items,
-            next_cursor: None,
-        })
+        ChatMembers::find()
+            .filter(chat_members::Column::UserId.eq(user_id))
+
+            .inner_join(Chats)
+
+            .join(
+                JoinType::InnerJoin,
+                chat_members::Relation::Users.def().rev(), 
+            )
+            .filter(users::Column::Id.ne(user_id)) 
+
+            .select_only()
+            .column_as(chats::Column::Id, "id")
+            .column_as(users::Column::Name, "name")
+            .column_as(users::Column::Nickname, "nickname")
+            .column_as(users::Column::AvatarUrl, "avatar_url")
+    
+            .expr_as(unread_subquery, "unread")
+
+            .expr_as(last_message_subquery, "last_message")
+            .expr_as(last_message_time_subquery, "last_message_time")
+
+            .order_by_desc(Expr::col("last_message_time"))
+            .into_model::<ChatResponse>()
+            .all(&state.conn)
+            .await
+            .unwrap_or_default()
     }
-
-    pub async fn open_or_get_chat(
+    pub async fn list_messages(
         state: &AppState,
-        user_id: &str,
-        nickname: &str,
-    ) -> Result<ChatCreateResponse, AppError> {
-        let normalized_nickname = Self::normalize_nickname(nickname)?;
-        let target_user = User::find()
-            .filter(users::Column::Nickname.eq(normalized_nickname.clone()))
-            .one(state.conn())
-            .await?
-            .ok_or(AppError::NotFound)?;
+        user_id: Uuid,
+        chat_id: Uuid,
+        params: MessageQuery,
+    ) -> Vec<MessageDto> {
 
-        if target_user.id == user_id {
-            return Err(AppError::BadRequest);
+        let mut query = Messages::find()
+            .filter(messages::Column::ChatId.eq(chat_id));
+
+        if let Some(cursor) = params.before {
+            query = query.filter(messages::Column::CreatedAt.lt(cursor));
         }
 
-        let existing = ChatMember::find()
-            .filter(chat_members::Column::UserId.eq(user_id.to_owned()))
-            .all(state.conn())
+        let messages = query
+            .order_by_desc(messages::Column::CreatedAt)
+            .limit(params.limit)
+            .into_model::<MessageDto>()
+            .all(&state.conn)
+            .await
+            .unwrap_or_default();
+
+        if params.before.is_none() && !messages.is_empty() {
+            ChatMembers::update_many()
+                .col_expr(
+                    chat_members::Column::LastReadAt,
+                    Expr::current_timestamp(),
+                )
+                .filter(chat_members::Column::ChatId.eq(chat_id))
+                .filter(chat_members::Column::UserId.eq(user_id))
+                .exec(&state.conn)
+                .await;
+        }
+
+        messages
+    }
+    pub async fn send_message(
+        state: &AppState,
+        sender_id: Uuid,
+        recipient_id: Uuid,
+        text: String,
+    ) -> Result<MessageDto, AppError> {
+
+        // есть ли чат (только для персональных)
+        let chat_id = ChatMembers::find()
+            .select_only()
+            .column(chat_members::Column::ChatId)
+            .filter(
+                chat_members::Column::UserId
+                    .is_in(vec![sender_id, recipient_id])
+            )
+            .group_by(chat_members::Column::ChatId)
+            .having(
+                Expr::col(chat_members::Column::UserId)
+                    .count()
+                    .eq(2)
+            )
+            .into_tuple::<Uuid>()
+            .one(&state.conn)
             .await?;
 
-        for member in existing {
-            let partner = ChatMember::find()
-                .filter(chat_members::Column::ChatId.eq(member.chat_id.clone()))
-                .filter(chat_members::Column::UserId.eq(target_user.id.clone()))
-                .one(state.conn())
+        let chat_id = if let Some(chat_id) = chat_id {
+            chat_id
+        } else {
+            let chat = Chats::insert(chats::ActiveModel {..Default::default()})
+                .exec(&state.conn)
                 .await?;
 
-            if partner.is_some() {
-                let chat = Chat::find_by_id(member.chat_id)
-                    .one(state.conn())
-                    .await?
-                    .ok_or(AppError::NotFound)?;
+            let chat_id = chat.last_insert_id;
 
-                let preview = Self::build_preview_for_user(state.conn(), chat, user_id).await?;
+            ChatMembers::insert(chat_members::ActiveModel {
+                chat_id: Set(chat_id),
+                user_id: Set(sender_id),
+                ..Default::default()
+            })
+            .exec(&state.conn)
+            .await?;
 
-                return Ok(ChatCreateResponse {
-                    chat: preview,
-                    created: false,
-                });
-            }
-        }
+            ChatMembers::insert(chat_members::ActiveModel {
+                chat_id: Set(chat_id),
+                user_id: Set(recipient_id),
+                ..Default::default()
+            })
+            .exec(&state.conn)
+            .await?;
 
-        Self::create_chat(state, user_id, &target_user).await
-    }
+            chat_id
+        };
 
-    pub async fn get_chat(
-        state: &AppState,
-        user_id: &str,
-        chat_id: &str,
-    ) -> Result<ChatPreview, AppError> {
-        let chat = Chat::find_by_id(chat_id.to_owned())
-            .one(state.conn())
-            .await?
-            .ok_or(AppError::NotFound)?;
 
-        Self::build_preview_for_user(state.conn(), chat, user_id).await
-    }
-
-    pub async fn mark_as_read(
-        state: &AppState,
-        user_id: &str,
-        chat_id: &str,
-        read_through_message_id: Option<String>,
-    ) -> Result<ChatReadResponse, AppError> {
-        let member = ChatMember::find()
-            .filter(chat_members::Column::ChatId.eq(chat_id.to_owned()))
-            .filter(chat_members::Column::UserId.eq(user_id.to_owned()))
-            .one(state.conn())
-            .await?
-            .ok_or(AppError::Forbidden)?;
-
-        let mut active = member.clone().into_active_model();
-        active.unread_count = Set(0);
-        active.last_read_message_id = Set(read_through_message_id);
-        active.last_read_at = Set(Some(Utc::now().into()));
-
-        active.update(state.conn()).await?;
-
-        Ok(ChatReadResponse {
-            ok: true,
-            unread: 0,
+        let message = Messages::insert(messages::ActiveModel {
+            chat_id: Set(chat_id),
+            sender_id: Set(sender_id),
+            text: Set(text.clone()),
+            ..Default::default()
         })
-    }
+            .exec(&state.conn)
+            .await?;
 
-    async fn create_chat(
-        state: &AppState,
-        user_id: &str,
-        partner: &users::Model,
-    ) -> Result<ChatCreateResponse, AppError> {
-        let chat_id = Uuid::new_v4().to_string();
+        let message_id = message.last_insert_id;
         let now = Utc::now();
 
-        let chat = ChatModel {
-            id: Set(chat_id.clone()),
-            created_by: Set(user_id.to_owned()),
-            kind: Set("direct".to_string()),
-            is_private: Set(true),
-            created_at: Set(now.into()),
-            last_message_id: Set(None),
-            last_message_text: Set(None),
-            last_message_time: Set(None),
-            ..Default::default()
-        };
+        ChatMembers::update_many()
+            .col_expr(
+                chat_members::Column::LastReadAt,
+                Expr::value(now),
+            )
+            .filter(chat_members::Column::ChatId.eq(chat_id))
+            .filter(chat_members::Column::UserId.eq(sender_id))
+            .exec(&state.conn)
+            .await?;
 
-        let chat = chat.insert(state.conn()).await?;
-
-        let first_member = ChatMemberModel {
-            chat_id: Set(chat_id.clone()),
-            user_id: Set(user_id.to_owned()),
-            unread_count: Set(0),
-            last_read_message_id: Set(None),
-            last_read_at: Set(None),
-            created_at: Set(now.into()),
-        };
-
-        let second_member = ChatMemberModel {
-            chat_id: Set(chat_id.clone()),
-            user_id: Set(partner.id.clone()),
-            unread_count: Set(0),
-            last_read_message_id: Set(None),
-            last_read_at: Set(None),
-            created_at: Set(now.into()),
-        };
-
-        first_member.insert(state.conn()).await?;
-        second_member.insert(state.conn()).await?;
-
-        let preview = Self::build_preview_for_user(state.conn(), chat, user_id).await?;
-
-        Ok(ChatCreateResponse {
-            chat: preview,
-            created: true,
+        Ok(MessageDto {
+            id: message_id,
+            chat_id,
+            sender_id,
+            text,
+            created_at: now,
         })
-    }
-
-    pub(crate) async fn build_preview_for_user(
-        conn: &DatabaseConnection,
-        chat: chats::Model,
-        user_id: &str,
-    ) -> Result<ChatPreview, AppError> {
-        let member = ChatMember::find()
-            .filter(chat_members::Column::ChatId.eq(chat.id.clone()))
-            .filter(chat_members::Column::UserId.eq(user_id.to_owned()))
-            .one(conn)
-            .await?
-            .ok_or(AppError::Forbidden)?;
-
-        let partner_member = ChatMember::find()
-            .filter(chat_members::Column::ChatId.eq(chat.id.clone()))
-            .filter(chat_members::Column::UserId.ne(user_id.to_owned()))
-            .one(conn)
-            .await?
-            .ok_or(AppError::NotFound)?;
-
-        let partner = User::find_by_id(partner_member.user_id.clone())
-            .one(conn)
-            .await?
-            .ok_or(AppError::NotFound)?;
-
-        Ok(ChatPreview {
-            id: chat.id.clone(),
-            name: partner.name,
-            nickname: partner.nickname,
-            last_message: chat.last_message_text,
-            last_message_time: chat.last_message_time.map(Into::into),
-            unread: member.unread_count,
-            avatar_url: partner.avatar_url,
-        })
-    }
-
-    fn normalize_nickname(nickname: &str) -> Result<String, AppError> {
-        let cleaned = nickname.trim();
-        if cleaned.is_empty() {
-            return Err(AppError::BadRequest);
-        }
-
-        let normalized = if cleaned.starts_with('@') {
-            cleaned.to_lowercase()
-        } else {
-            format!("@{}", cleaned.to_lowercase())
-        };
-
-        if normalized.len() > 32 || normalized.len() < 2 {
-            return Err(AppError::BadRequest);
-        }
-
-        if !normalized
-            .chars()
-            .all(|c| c == '@' || c == '_' || c.is_ascii_alphanumeric())
-        {
-            return Err(AppError::BadRequest);
-        }
-
-        Ok(normalized)
     }
 }

@@ -72,13 +72,8 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(ChatMembers::ChatId).uuid().not_null())
                     .col(ColumnDef::new(ChatMembers::UserId).uuid().not_null())
                     .col(
-                        ColumnDef::new(ChatMembers::UnreadCount)
-                            .integer()
-                            .not_null()
-                            .default(0),
+                        ColumnDef::new(ChatMembers::LastReadAt).timestamp_with_time_zone(),
                     )
-                    .col(ColumnDef::new(ChatMembers::LastReadMessageId).uuid())
-                    .col(ColumnDef::new(ChatMembers::LastReadAt).timestamp_with_time_zone())
                     .col(
                         ColumnDef::new(ChatMembers::CreatedAt)
                             .timestamp_with_time_zone()
@@ -222,10 +217,6 @@ enum ChatMembers {
     ChatId,
     #[iden = "user_id"]
     UserId,
-    #[iden = "unread_count"]
-    UnreadCount,
-    #[iden = "last_read_message_id"]
-    LastReadMessageId,
     #[iden = "last_read_at"]
     LastReadAt,
     #[iden = "created_at"]

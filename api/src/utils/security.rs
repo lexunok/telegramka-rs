@@ -113,6 +113,20 @@ pub fn build_token_pair(
         expires_in: access_exp,
     })
 }
+pub fn decode_refresh_token(token: &String) -> Result<Claims, AppError> {
+    let token_data = decode::<Claims>(
+        &token,
+        &GLOBAL_CONFIG.decoding_key,
+        &Validation::new(Algorithm::HS256),
+    )
+    .map_err(|_| AppError::InvalidToken)?;
+
+    if token_data.claims.token_type != TokenType::Refresh {
+        return Err(AppError::InvalidToken);
+    }
+
+    Ok(token_data.claims)
+}
 
 pub fn hash_password(password: &str) -> Result<String, AppError> {
     let salt = SaltString::generate(&mut OsRng);

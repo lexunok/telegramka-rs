@@ -1,12 +1,12 @@
 use crate::{
     AppState,
-    dtos::auth::{
-        CheckEmailRequest, CheckEmailResponse, LoginRequest, RefreshRequest, RefreshResponse,
-        RegisterRequest, RegisterResponse, VerificationInfo, VerifyCodeRequest, VerifyCodeResponse,
-    },
+    dtos::{auth::{
+        RefreshRequest, RefreshResponse,
+        RegisterRequest, VerifyCodeRequest, VerifyCodeResponse,
+    }, users::UserDto},
     error::AppError,
     utils::{
-        security::{TokenPair, build_token_pair},
+        security::{build_token_pair, decode_refresh_token, verify_password},
         smtp::send_auth_code,
     },
 };
@@ -15,7 +15,7 @@ use chrono::{Duration, Utc};
 use entity::{prelude::*, users, verification_codes};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
-    QueryOrder, prelude::Expr,
+    QueryOrder,
 };
 
 pub struct AuthService;
@@ -55,34 +55,38 @@ impl AuthService {
         payload: VerifyCodeRequest,
     ) -> Result<VerifyCodeResponse, AppError> {
         let now = Utc::now();
-
+        let email = payload.email.to_lowercase();
         let verification = VerificationCodes::find()
-            .filter(verification_codes::Column::Email.eq(payload.email.to_lowercase().clone()))
-            .filter(verification_codes::Column::Code.eq(payload.code))
+            .filter(verification_codes::Column::Email.eq(email.clone()))
             .filter(verification_codes::Column::ExpiresAt.gt(now))
+            .filter(verification_codes::Column::AttemptCount.lte(3))
             .order_by_desc(verification_codes::Column::CreatedAt)
             .one(&state.conn)
             .await?
             .ok_or(AppError::WrongCredentials)?;
 
-        let mut verification_active = verification.clone().into_active_model();
-        verification_active.attempt_count = Set(verification.attempt_count + 1);
-        verification_active.used_at = Set(Some(now.into()));
-        verification_active.update(state.conn()).await?;
+        if !verify_password(&verification.code, &payload.code) {
+            let attempt_count = verification.attempt_count;
+            let mut verification = verification.into_active_model();
+            verification.attempt_count = Set(attempt_count + 1);
+            verification.update(&state.conn).await?;   
+            return Err(AppError::Custom("Неправильно введен код!".to_string()));
+        }
 
-        let user = User::find()
-            .filter(users::Column::Email.eq(email.clone()))
-            .one(state.conn())
+        let user: UserDto = Users::find()
+            .filter(users::Column::Email.eq(email))
+            .into_partial_model()
+            .one(&state.conn)
             .await?
             .ok_or(AppError::NotFound)?;
 
-        let tokens = Self::build_tokens(&user)?;
+        let tokens = build_token_pair(user.id, user.name.clone(), user.email.clone(), user.nickname.clone())?;
 
         Ok(VerifyCodeResponse {
             access_token: tokens.access_token,
             refresh_token: tokens.refresh_token,
             expires_in: tokens.expires_in,
-            user: Self::map_user(&user),
+            user,
         })
     }
 
@@ -91,13 +95,12 @@ impl AuthService {
         payload: RefreshRequest,
     ) -> Result<RefreshResponse, AppError> {
         let claims = decode_refresh_token(&payload.refresh_token)?;
-        let user = User::find()
-            .filter(users::Column::Id.eq(claims.sub))
-            .one(state.conn())
+        let user = Users::find_by_id(claims.sub)
+            .one(&state.conn)
             .await?
             .ok_or(AppError::NotFound)?;
 
-        let tokens = Self::build_tokens(&user)?;
+        let tokens = build_token_pair(user.id, user.name, user.email, user.nickname)?;
 
         Ok(RefreshResponse {
             access_token: tokens.access_token,

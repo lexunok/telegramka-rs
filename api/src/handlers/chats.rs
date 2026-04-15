@@ -1,11 +1,11 @@
 use crate::{
     AppState,
     dtos::{
-        chats::{CreateChatRequest, ReadChatRequest},
-        messages::SendMessageRequest,
+        chats::{ChatResponse, CreateChatRequest},
+        messages::{MessageDto, MessageQuery, SendMessageRequest},
     },
     error::AppError,
-    services::{chats::ChatService, messages::MessageService},
+    services::{chats::ChatService},
     utils::security::Claims,
 };
 use axum::{
@@ -14,95 +14,38 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use serde::Deserialize;
-
-#[derive(Debug, Deserialize)]
-struct ChatListQuery {
-    #[serde(rename = "cursor")]
-    _cursor: Option<String>,
-    #[serde(rename = "limit")]
-    _limit: Option<u32>,
-}
-
-#[derive(Debug, Deserialize)]
-struct MessageListQuery {
-    #[serde(rename = "cursor")]
-    _cursor: Option<String>,
-    #[serde(rename = "limit")]
-    limit: Option<u32>,
-}
+use sea_orm::prelude::Uuid;
 
 pub fn chats_router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_chats))
-        .route("/", post(create_chat))
-        .route("/:chat_id", get(get_chat))
-        .route("/:chat_id/read", post(mark_read))
-        .route("/:chat_id/messages", get(list_messages))
-        .route("/:chat_id/messages", post(send_message))
+        .route("/:chat_id/messages", get(list_messages).post(send_message))
 }
 
 async fn list_chats(
     State(state): State<AppState>,
     claims: Claims,
-    Query(query): Query<ChatListQuery>,
-) -> Result<impl IntoResponse, AppError> {
-    let _ = claims;
-    let response = ChatService::list_chats(&state, &claims.sub, query._limit).await?;
-    Ok(Json(response))
-}
-
-async fn create_chat(
-    State(state): State<AppState>,
-    claims: Claims,
-    Json(payload): Json<CreateChatRequest>,
-) -> Result<impl IntoResponse, AppError> {
-    let response = ChatService::open_or_get_chat(&state, &claims.sub, &payload.nickname).await?;
-    Ok(Json(response))
-}
-
-async fn get_chat(
-    State(state): State<AppState>,
-    claims: Claims,
-    Path(chat_id): Path<String>,
-) -> Result<impl IntoResponse, AppError> {
-    let response = ChatService::get_chat(&state, &claims.sub, &chat_id).await?;
-    Ok(Json(response))
-}
-
-async fn mark_read(
-    State(state): State<AppState>,
-    claims: Claims,
-    Path(chat_id): Path<String>,
-    Json(payload): Json<ReadChatRequest>,
-) -> Result<impl IntoResponse, AppError> {
-    let response = ChatService::mark_as_read(
-        &state,
-        &claims.sub,
-        &chat_id,
-        payload.read_through_message_id,
-    )
-    .await?;
-    Ok(Json(response))
+) -> Json<Vec<ChatResponse>> {
+    let response = ChatService::list_chats(&state, claims.sub).await;
+    Json(response)
 }
 
 async fn list_messages(
     State(state): State<AppState>,
     claims: Claims,
-    Path(chat_id): Path<String>,
-    Query(query): Query<MessageListQuery>,
-) -> Result<impl IntoResponse, AppError> {
-    let response =
-        MessageService::list_messages(&state, &claims.sub, &chat_id, query.limit).await?;
-    Ok(Json(response))
+    Path(chat_id): Path<Uuid>,
+    Query(params): Query<MessageQuery>
+) -> Json<Vec<MessageDto>> {
+    let response = ChatService::list_messages(&state, claims.sub, chat_id, params).await;
+    Json(response)
 }
 
 async fn send_message(
     State(state): State<AppState>,
     claims: Claims,
-    Path(chat_id): Path<String>,
+    Path(chat_id): Path<Uuid>,
     Json(payload): Json<SendMessageRequest>,
-) -> Result<impl IntoResponse, AppError> {
-    let response = MessageService::send_message(&state, &claims.sub, &chat_id, payload).await?;
-    Ok(Json(response))
+) -> Result<MessageDto, AppError> {
+    let response = ChatService::send_message(&state, claims.sub, chat_id, payload.text).await?;
+    Ok(response)
 }

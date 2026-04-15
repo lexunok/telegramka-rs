@@ -4,7 +4,7 @@ use crate::{
         RefreshRequest, RefreshResponse, RegisterRequest, VerifyCodeRequest, VerifyCodeResponse,
     },
     error::AppError,
-    services::auth::AuthService,
+    services::auth::AuthService, utils::security::Claims,
 };
 use axum::{
     Json, Router,
@@ -14,7 +14,7 @@ use axum::{
 
 pub fn auth_router() -> Router<AppState> {
     Router::new()
-        .route("/login/", post(login))
+        .route("/login", post(login))
         .route("/register", post(register))
         .route("/verify-code", post(verify_code))
         .route("/refresh", post(refresh))
@@ -41,6 +41,7 @@ async fn verify_code(
 
 async fn refresh(
     State(state): State<AppState>,
+    _: Claims,
     Json(payload): Json<RefreshRequest>,
 ) -> Result<RefreshResponse, AppError> {
     let response = AuthService::refresh(&state, payload).await?;

@@ -1,12 +1,12 @@
 use chrono::{DateTime, Utc};
 use macros::IntoDataResponse;
-use sea_orm::DerivePartialModel;
+use sea_orm::{DerivePartialModel, prelude::Uuid};
 use serde::Serialize;
 
 #[derive(IntoDataResponse, Debug, Serialize, DerivePartialModel)]
 #[sea_orm(entity = "entity::users::Entity")]
 pub struct UserDto {
-    pub id: String,
+    pub id: Uuid,
     pub name: String,
     pub email: String,
     pub nickname: String,
