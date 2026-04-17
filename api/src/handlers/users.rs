@@ -6,7 +6,7 @@ use axum::{
 };
 
 pub fn users_router() -> Router<AppState> {
-    Router::new().route("/by-nickname/:nickname", get(find_by_nickname))
+    Router::new().route("/by-nickname/{nickname}", get(find_by_nickname))
 }
 
 async fn find_by_nickname(

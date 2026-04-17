@@ -12,7 +12,7 @@
 ```bash
 # Запуск PostgreSQL
 docker run -d \
-  --name hits \
+  --name telegramka \
   -e POSTGRES_DB=telegramka \
   -e POSTGRES_USER=lexunok \
   -e POSTGRES_PASSWORD=password \

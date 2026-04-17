@@ -155,6 +155,8 @@ impl MigrationTrait for Migration {
                             .default(Expr::cust("gen_random_uuid()")),
                     )
                     .col(ColumnDef::new(VerificationCodes::Email).string().not_null())
+                    .col(ColumnDef::new(VerificationCodes::Name).string().null())
+                    .col(ColumnDef::new(VerificationCodes::Nickname).string().null())
                     .col(ColumnDef::new(VerificationCodes::Code).string().not_null())
                     .col(
                         ColumnDef::new(VerificationCodes::ExpiresAt)
@@ -247,6 +249,10 @@ enum VerificationCodes {
     Id,
     #[iden = "email"]
     Email,
+    #[iden = "name"]
+    Name,
+    #[iden = "nickname"]
+    Nickname,
     #[iden = "code"]
     Code,
     #[iden = "expires_at"]

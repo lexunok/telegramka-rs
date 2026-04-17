@@ -1,7 +1,7 @@
 use crate::{
     AppState,
     dtos::auth::{
-        RefreshRequest, RefreshResponse, RegisterRequest, VerifyCodeRequest, VerifyCodeResponse,
+        LoginRequest, RefreshRequest, RefreshResponse, RegisterRequest, VerifyCodeRequest, VerifyCodeResponse
     },
     error::AppError,
     services::auth::AuthService, utils::security::Claims,
@@ -20,8 +20,8 @@ pub fn auth_router() -> Router<AppState> {
         .route("/refresh", post(refresh))
 }
 
-async fn login(State(state): State<AppState>, Path(payload): Path<String>) -> Result<(), AppError> {
-    AuthService::login(&state, payload).await
+async fn login(State(state): State<AppState>, Json(payload): Json<LoginRequest>) -> Result<(), AppError> {
+    AuthService::login(&state, payload.email).await
 }
 
 async fn register(

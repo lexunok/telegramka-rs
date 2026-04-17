@@ -79,7 +79,7 @@ impl IntoResponse for AppError {
             AppError::DbErr(e) => {
                 tracing::error!("Database source error: {:?}", e);
                 (
-                    StatusCode::INTERNAL_SERVER_ERROR,
+                    StatusCode::CONFLICT,
                     "A database error occurred".to_string(),
                 )
             }

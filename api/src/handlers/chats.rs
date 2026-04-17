@@ -18,7 +18,7 @@ use sea_orm::prelude::Uuid;
 pub fn chats_router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_chats))
-        .route("/:chat_id/messages", get(list_messages).post(send_message))
+        .route("/{chat_id}/messages", get(list_messages).post(send_message))
 }
 
 async fn list_chats(State(state): State<AppState>, claims: Claims) -> Json<Vec<ChatResponse>> {

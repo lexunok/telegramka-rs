@@ -10,6 +10,8 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub email: String,
+    pub name: Option<String>,
+    pub nickname: Option<String>,
     pub code: String,
     pub expires_at: DateTimeWithTimeZone,
     pub attempt_count: i32,

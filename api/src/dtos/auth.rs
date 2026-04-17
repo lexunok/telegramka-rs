@@ -8,6 +8,11 @@ pub struct RegisterRequest {
     pub email: String,
     pub nickname: String,
 }
+#[derive(Debug, Deserialize)]
+pub struct LoginRequest {
+    pub email: String,
+}
+
 
 #[derive(Debug, Deserialize)]
 pub struct VerifyCodeRequest {

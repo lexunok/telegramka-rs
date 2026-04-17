@@ -15,9 +15,7 @@ use crate::{
 use argon2::password_hash::rand_core::{OsRng, RngCore};
 use chrono::{Duration, Utc};
 use entity::{prelude::*, users, verification_codes};
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
-    QueryOrder,
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, ExprTrait, IntoActiveModel, QueryFilter, QueryOrder, TransactionTrait
 };
 
 pub struct AuthService;
@@ -32,22 +30,24 @@ impl AuthService {
             .await?
             .ok_or(AppError::NotFound)?;
 
-        Self::issue_verification_code(state, email).await?;
+        Self::issue_verification_code(state, email, None, None).await?;
 
         Ok(())
     }
 
     pub async fn register(state: &AppState, payload: RegisterRequest) -> Result<(), AppError> {
-        let user = users::ActiveModel {
-            email: Set(payload.email.to_lowercase()),
-            name: Set(payload.name),
-            nickname: Set(payload.nickname),
-            ..Default::default()
-        };
 
-        let user = user.insert(&state.conn).await?;
+        let res = Users::find()
+            .filter(users::Column::Email.eq(&payload.email.to_lowercase()).or(users::Column::Nickname.eq(&payload.nickname)))
+            .one(&state.conn)
+            .await?;
 
-        Self::issue_verification_code(state, user.email).await?;
+        if let Some(_) = res {
+            return Err(AppError::Custom("Пользователь с таким email или nickname уже существует!".to_string()))
+        }
+
+        Self::issue_verification_code(state, payload.email.to_lowercase(), Some(payload.name), Some(payload.nickname)).await?;
+
         Ok(())
     }
 
@@ -73,6 +73,16 @@ impl AuthService {
             verification.update(&state.conn).await?;
             return Err(AppError::Custom("Неправильно введен код!".to_string()));
         }
+
+        if let Some(nickname) = verification.nickname {
+            let user = users::ActiveModel {
+                email: Set(verification.email),
+                name: Set(verification.name.unwrap_or_default()),
+                nickname: Set(nickname),
+                ..Default::default()
+            };
+            user.insert(&state.conn).await?;
+        } 
 
         let user: UserDto = Users::find()
             .filter(users::Column::Email.eq(email))
@@ -115,7 +125,7 @@ impl AuthService {
         })
     }
 
-    async fn issue_verification_code(state: &AppState, email: String) -> Result<(), AppError> {
+    async fn issue_verification_code(state: &AppState, email: String, name: Option<String>, nickname: Option<String>) -> Result<(), AppError> {
         let mut rng = OsRng;
         let random_u32 = rng.next_u32();
         let code = (100_000 + (random_u32 % 900_000)).to_string();
@@ -124,6 +134,8 @@ impl AuthService {
         let expires_at = now + Duration::minutes(Self::CODE_TTL_MINUTES);
 
         let verification = verification_codes::ActiveModel {
+            name: Set(name),
+            nickname: Set(nickname),
             email: Set(email.clone()),
             code: Set(hash_password(&code)?),
             expires_at: Set(expires_at.into()),
