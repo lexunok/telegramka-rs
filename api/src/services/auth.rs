@@ -15,7 +15,7 @@ use crate::{
 use argon2::password_hash::rand_core::{OsRng, RngCore};
 use chrono::{Duration, Utc};
 use entity::{prelude::*, users, verification_codes};
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, ExprTrait, IntoActiveModel, QueryFilter, QueryOrder, TransactionTrait
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, ExprTrait, IntoActiveModel, QueryFilter, QueryOrder,
 };
 
 pub struct AuthService;

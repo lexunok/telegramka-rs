@@ -13,18 +13,37 @@ use sea_orm::{
     ColumnTrait, EntityTrait, ExprTrait, JoinType, QueryFilter, QueryOrder, QuerySelect,
     QueryTrait, RelationTrait, TransactionTrait,
     prelude::{Uuid, *},
-    sea_query::Query,
+    sea_query::{Query, Alias},
 };
 
 pub struct ChatService;
 
 impl ChatService {
     pub async fn list_chats(state: &AppState, user_id: Uuid) -> Vec<ChatResponse> {
+        let cm_other_alias = Alias::new("cm_other");
+
+        let other_user = Alias::new("other_user");
+
+        let unread_subquery = Query::select()
+            .expr(Expr::col(messages::Column::Id).count())
+            .from(Messages)
+            .and_where(
+                Expr::col((Messages, messages::Column::ChatId))
+                    .equals((Alias::new("chats"), chats::Column::Id))
+            )
+            .and_where(
+                Expr::cust(
+                    "chat_members.last_read_at IS NULL OR messages.created_at > chat_members.last_read_at"
+                )
+            )
+            .to_owned();
+
         let last_message_subquery = Messages::find()
             .select_only()
             .column(messages::Column::Text)
             .filter(
-                Expr::col((Messages, messages::Column::ChatId)).equals((Chats, chats::Column::Id)),
+                Expr::col((Messages, messages::Column::ChatId))
+                    .equals((Alias::new("chats"), chats::Column::Id)),
             )
             .order_by_desc(messages::Column::CreatedAt)
             .limit(1)
@@ -34,39 +53,43 @@ impl ChatService {
             .select_only()
             .column(messages::Column::CreatedAt)
             .filter(
-                Expr::col((Messages, messages::Column::ChatId)).equals((Chats, chats::Column::Id)),
+                Expr::col((Messages, messages::Column::ChatId))
+                    .equals((Alias::new("chats"), chats::Column::Id)),
             )
             .order_by_desc(messages::Column::CreatedAt)
             .limit(1)
             .into_query();
 
-        let unread_subquery = Query::select()
-            .expr(Expr::col(messages::Column::Id).count())
-            .from(Messages)
-            .and_where(
-                Expr::col((Messages, messages::Column::ChatId))
-                    .equals((Chats, chats::Column::Id))
-            )
-            .and_where(
-                Expr::cust(
-                    "chat_members.last_read_at IS NULL OR messages.created_at > chat_members.last_read_at"
-                )
-            )
-            .to_owned();
-
         ChatMembers::find()
             .filter(chat_members::Column::UserId.eq(user_id))
             .inner_join(Chats)
-            .join(
+            .join_as(
                 JoinType::InnerJoin,
-                chat_members::Relation::Users.def().rev(),
+                chats::Relation::ChatMembers.def(),
+                cm_other_alias.clone()
             )
-            .filter(users::Column::Id.ne(user_id))
+            .filter(
+                Expr::col((cm_other_alias.clone(), chat_members::Column::UserId)).ne(user_id)
+            )
+            .join_as( 
+                JoinType::InnerJoin,
+                chat_members::Relation::Users.def(),
+                other_user.clone()
+            )
             .select_only()
             .column_as(chats::Column::Id, "id")
-            .column_as(users::Column::Name, "name")
-            .column_as(users::Column::Nickname, "nickname")
-            .column_as(users::Column::AvatarUrl, "avatar_url")
+            .column_as(
+                Expr::col((other_user.clone(), users::Column::Name)), 
+                "name"
+            )
+            .column_as(
+                Expr::col((other_user.clone(), users::Column::Nickname)), 
+                "nickname"
+            )
+            .column_as(
+                Expr::col((other_user.clone(), users::Column::AvatarUrl)), 
+                "avatar_url"
+            )
             .expr_as(unread_subquery, "unread")
             .expr_as(last_message_subquery, "last_message")
             .expr_as(last_message_time_subquery, "last_message_time")
@@ -74,7 +97,7 @@ impl ChatService {
             .into_model::<ChatResponse>()
             .all(&state.conn)
             .await
-            .unwrap_or_default()
+            .unwrap()
     }
     pub async fn list_messages(
         state: &AppState,
@@ -89,7 +112,7 @@ impl ChatService {
         }
 
         let messages = query
-            .order_by_desc(messages::Column::CreatedAt)
+            .order_by_asc(messages::Column::CreatedAt)
             .limit(params.limit)
             .into_model::<MessageDto>()
             .all(&state.conn)
@@ -117,9 +140,8 @@ impl ChatService {
         let chat_id = ChatMembers::find()
             .select_only()
             .column(chat_members::Column::ChatId)
-            .filter(chat_members::Column::UserId.is_in(vec![sender_id, recipient_id]))
+            .filter(chat_members::Column::UserId.is_in(vec![sender_id, recipient_id]).or(chat_members::Column::ChatId.eq(recipient_id)))
             .group_by(chat_members::Column::ChatId)
-            .having(Expr::col(chat_members::Column::UserId).count().eq(2))
             .into_tuple::<Uuid>()
             .one(&state.conn)
             .await?;
@@ -186,7 +208,7 @@ impl ChatService {
         txn.commit().await?;
 
         //Пока только персональные чаты
-        let recipients: Vec<Uuid> = vec![recipient_id];
+        let recipients: Vec<Uuid> = vec![recipient_id, sender_id];
 
         let _ = state.tx.send(WsEvent::NewMessage {
             recipients,

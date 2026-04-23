@@ -8,7 +8,7 @@ use crate::{
 };
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::State,
     routing::post,
 };
 
@@ -41,7 +41,6 @@ async fn verify_code(
 
 async fn refresh(
     State(state): State<AppState>,
-    _: Claims,
     Json(payload): Json<RefreshRequest>,
 ) -> Result<RefreshResponse, AppError> {
     let response = AuthService::refresh(&state, payload).await?;
