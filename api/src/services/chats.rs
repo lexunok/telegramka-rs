@@ -2,7 +2,7 @@ use crate::{
     AppState,
     dtos::{
         chats::ChatResponse,
-        messages::{MessageDto, MessageQuery, WsEvent},
+        messages::{MessageDto, MessageQuery, SendMessageRequest, WsEvent},
     },
     error::AppError,
 };
@@ -13,7 +13,7 @@ use sea_orm::{
     ColumnTrait, EntityTrait, ExprTrait, JoinType, QueryFilter, QueryOrder, QuerySelect,
     QueryTrait, RelationTrait, TransactionTrait,
     prelude::{Uuid, *},
-    sea_query::{Query, Alias},
+    sea_query::{Alias, Query},
 };
 
 pub struct ChatService;
@@ -66,29 +66,24 @@ impl ChatService {
             .join_as(
                 JoinType::InnerJoin,
                 chats::Relation::ChatMembers.def(),
-                cm_other_alias.clone()
+                cm_other_alias.clone(),
             )
-            .filter(
-                Expr::col((cm_other_alias.clone(), chat_members::Column::UserId)).ne(user_id)
-            )
-            .join_as( 
+            .filter(Expr::col((cm_other_alias.clone(), chat_members::Column::UserId)).ne(user_id))
+            .join_as(
                 JoinType::InnerJoin,
                 chat_members::Relation::Users.def(),
-                other_user.clone()
+                other_user.clone(),
             )
             .select_only()
             .column_as(chats::Column::Id, "id")
+            .column_as(Expr::col((other_user.clone(), users::Column::Name)), "name")
             .column_as(
-                Expr::col((other_user.clone(), users::Column::Name)), 
-                "name"
+                Expr::col((other_user.clone(), users::Column::Nickname)),
+                "nickname",
             )
             .column_as(
-                Expr::col((other_user.clone(), users::Column::Nickname)), 
-                "nickname"
-            )
-            .column_as(
-                Expr::col((other_user.clone(), users::Column::AvatarUrl)), 
-                "avatar_url"
+                Expr::col((other_user.clone(), users::Column::AvatarUrl)),
+                "avatar_url",
             )
             .expr_as(unread_subquery, "unread")
             .expr_as(last_message_subquery, "last_message")
@@ -133,14 +128,17 @@ impl ChatService {
     pub async fn send_message(
         state: &AppState,
         sender_id: Uuid,
-        recipient_id: Uuid,
-        text: String,
+        payload: SendMessageRequest,
     ) -> Result<MessageDto, AppError> {
         // есть ли чат (только для персональных)
         let chat_id = ChatMembers::find()
             .select_only()
             .column(chat_members::Column::ChatId)
-            .filter(chat_members::Column::UserId.is_in(vec![sender_id, recipient_id]).or(chat_members::Column::ChatId.eq(recipient_id)))
+            .filter(
+                chat_members::Column::UserId
+                    .is_in(vec![sender_id, payload.chat_id])
+                    .or(chat_members::Column::ChatId.eq(payload.chat_id)),
+            )
             .group_by(chat_members::Column::ChatId)
             .into_tuple::<Uuid>()
             .one(&state.conn)
@@ -169,7 +167,7 @@ impl ChatService {
 
             ChatMembers::insert(chat_members::ActiveModel {
                 chat_id: Set(chat_id),
-                user_id: Set(recipient_id),
+                user_id: Set(payload.chat_id),
                 ..Default::default()
             })
             .exec(&txn)
@@ -179,9 +177,10 @@ impl ChatService {
         };
 
         let message = Messages::insert(messages::ActiveModel {
+            id: Set(payload.id),
             chat_id: Set(chat_id),
             sender_id: Set(sender_id),
-            text: Set(text.clone()),
+            text: Set(payload.text.clone()),
             ..Default::default()
         })
         .exec(&txn)
@@ -194,7 +193,7 @@ impl ChatService {
             id: message_id,
             chat_id,
             sender_id,
-            text,
+            text: payload.text,
             created_at: now,
         };
 
@@ -208,7 +207,7 @@ impl ChatService {
         txn.commit().await?;
 
         //Пока только персональные чаты
-        let recipients: Vec<Uuid> = vec![recipient_id, sender_id];
+        let recipients: Vec<Uuid> = vec![payload.chat_id, sender_id];
 
         let _ = state.tx.send(WsEvent::NewMessage {
             recipients,

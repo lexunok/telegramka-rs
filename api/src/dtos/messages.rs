@@ -19,6 +19,8 @@ pub struct MessageQuery {
 }
 #[derive(Debug, Deserialize)]
 pub struct SendMessageRequest {
+    pub chat_id: Uuid,
+    pub id: Uuid,
     pub text: String,
 }
 

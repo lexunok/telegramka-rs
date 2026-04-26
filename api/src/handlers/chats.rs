@@ -11,14 +11,15 @@ use crate::{
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
-    routing::get,
+    routing::{get, post},
 };
 use sea_orm::prelude::Uuid;
 
 pub fn chats_router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_chats))
-        .route("/{chat_id}/messages", get(list_messages).post(send_message))
+        .route("/{chat_id}/messages", get(list_messages))
+        .route("/messages", post(send_message))
 }
 
 async fn list_chats(State(state): State<AppState>, claims: Claims) -> Json<Vec<ChatResponse>> {
@@ -39,9 +40,8 @@ async fn list_messages(
 async fn send_message(
     State(state): State<AppState>,
     claims: Claims,
-    Path(chat_id): Path<Uuid>,
     Json(payload): Json<SendMessageRequest>,
 ) -> Result<MessageDto, AppError> {
-    let response = ChatService::send_message(&state, claims.sub, chat_id, payload.text).await?;
+    let response = ChatService::send_message(&state, claims.sub, payload).await?;
     Ok(response)
 }
