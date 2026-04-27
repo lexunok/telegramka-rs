@@ -13,86 +13,112 @@ use sea_orm::{
     ColumnTrait, EntityTrait, ExprTrait, JoinType, QueryFilter, QueryOrder, QuerySelect,
     QueryTrait, RelationTrait, TransactionTrait,
     prelude::{Uuid, *},
-    sea_query::{Alias, Query},
+    sea_query::{Alias, Query, IntoCondition},
 };
 
 pub struct ChatService;
 
 impl ChatService {
     pub async fn list_chats(state: &AppState, user_id: Uuid) -> Vec<ChatResponse> {
-        let cm_other_alias = Alias::new("cm_other");
+        let me = Alias::new("me");
+        let other_member = Alias::new("other_member");
 
-        let other_user = Alias::new("other_user");
-
-        let unread_subquery = Query::select()
-            .expr(Expr::col(messages::Column::Id).count())
-            .from(Messages)
-            .and_where(
-                Expr::col((Messages, messages::Column::ChatId))
-                    .equals((Alias::new("chats"), chats::Column::Id))
-            )
-            .and_where(
-                Expr::cust(
-                    "chat_members.last_read_at IS NULL OR messages.created_at > chat_members.last_read_at"
-                )
-            )
-            .to_owned();
-
-        let last_message_subquery = Messages::find()
-            .select_only()
-            .column(messages::Column::Text)
-            .filter(
-                Expr::col((Messages, messages::Column::ChatId))
-                    .equals((Alias::new("chats"), chats::Column::Id)),
-            )
-            .order_by_desc(messages::Column::CreatedAt)
-            .limit(1)
-            .into_query();
-
-        let last_message_time_subquery = Messages::find()
-            .select_only()
-            .column(messages::Column::CreatedAt)
-            .filter(
-                Expr::col((Messages, messages::Column::ChatId))
-                    .equals((Alias::new("chats"), chats::Column::Id)),
-            )
-            .order_by_desc(messages::Column::CreatedAt)
-            .limit(1)
-            .into_query();
-
-        ChatMembers::find()
-            .filter(chat_members::Column::UserId.eq(user_id))
-            .inner_join(Chats)
+        Chats::find()
             .join_as(
                 JoinType::InnerJoin,
-                chats::Relation::ChatMembers.def(),
-                cm_other_alias.clone(),
+                chats::Relation::ChatMembers.def().on_condition(move |_left, right| {
+                    Expr::col((right, chat_members::Column::UserId))
+                        .eq(user_id)
+                        .into_condition()
+                }),
+                me.clone(),
             )
-            .filter(Expr::col((cm_other_alias.clone(), chat_members::Column::UserId)).ne(user_id))
             .join_as(
                 JoinType::InnerJoin,
-                chat_members::Relation::Users.def(),
-                other_user.clone(),
+                chats::Relation::ChatMembers.def().on_condition(move |_left, right| {
+                        Expr::col((right, chat_members::Column::ChatId))
+                            .eq(Expr::col((me.clone(), chat_members::Column::ChatId)))
+                            .into_condition()
+                }),
+                other_member.clone(),
             )
+            .join(
+                JoinType::InnerJoin,
+                chat_members::Relation::Users.def().from_alias(other_member.clone()).on_condition(move |_left, right| {
+                    Expr::col((right, users::Column::Id))
+                        .ne(user_id)
+                        .into_condition()
+                }),
+            )
+
             .select_only()
-            .column_as(chats::Column::Id, "id")
-            .column_as(Expr::col((other_user.clone(), users::Column::Name)), "name")
+            .column(chats::Column::Id)
             .column_as(
-                Expr::col((other_user.clone(), users::Column::Nickname)),
+                users::Column::Name,
+                "name",
+            )
+            .column_as(
+                users::Column::Nickname,
                 "nickname",
             )
             .column_as(
-                Expr::col((other_user.clone(), users::Column::AvatarUrl)),
+                users::Column::AvatarUrl,
                 "avatar_url",
             )
-            .expr_as(unread_subquery, "unread")
-            .expr_as(last_message_subquery, "last_message")
-            .expr_as(last_message_time_subquery, "last_message_time")
+
+            .expr_as(
+                Messages::find()
+                    .select_only()
+                    .column(messages::Column::Text)
+                    .filter(
+                        Expr::col(messages::Column::ChatId)
+                            .equals(chats::Column::Id),
+                    )
+                    .order_by_desc(messages::Column::CreatedAt)
+                    .limit(1)
+                    .into_query(),
+                "last_message",
+            )
+            .expr_as(
+                Messages::find()
+                    .select_only()
+                    .column(messages::Column::CreatedAt)
+                    .filter(
+                        Expr::col(messages::Column::ChatId)
+                            .equals(chats::Column::Id),
+                    )
+                    .order_by_desc(messages::Column::CreatedAt)
+                    .limit(1)
+                    .into_query(),
+                "last_message_time",
+            )
+            .expr_as(
+                Query::select()
+                    .expr(Expr::col(messages::Column::Id).count())
+                    .from(Messages)
+                    .and_where(
+                        Expr::col(messages::Column::ChatId)
+                            .equals(chats::Column::Id),
+                    )
+                    .and_where(
+                        Expr::cust(format!(
+                            "NOT EXISTS (
+                                SELECT 1 FROM chat_members cm
+                                WHERE cm.chat_id = chats.id
+                                AND cm.user_id = '{}'
+                                AND cm.last_read_at >= messages.created_at
+                            )",
+                            user_id
+                        )),
+                    )
+                    .to_owned(),
+                "unread",
+            )
             .order_by_desc(Expr::col("last_message_time"))
             .into_model::<ChatResponse>()
             .all(&state.conn)
             .await
-            .unwrap()
+            .unwrap_or_default()
     }
     pub async fn list_messages(
         state: &AppState,
