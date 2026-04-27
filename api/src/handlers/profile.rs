@@ -1,11 +1,20 @@
 use crate::{
-    AppState, dtos::users::UserDto, error::AppError, services::profile::ProfileService,
+    AppState,
+    dtos::users::{AvatarResponse, UserDto},
+    error::AppError,
+    services::profile::ProfileService,
     utils::security::Claims,
 };
-use axum::{Router, extract::State, routing::get};
+use axum::{
+    Router,
+    extract::{Multipart, State},
+    routing::{get, post},
+};
 
 pub fn profile_router() -> Router<AppState> {
-    Router::new().route("/", get(get_my_profile))
+    Router::new()
+        .route("/", get(get_my_profile))
+        .route("/avatar", post(upload_avatar))
 }
 
 async fn get_my_profile(
@@ -14,4 +23,25 @@ async fn get_my_profile(
 ) -> Result<UserDto, AppError> {
     let user = ProfileService::get_my(&state, claims.sub).await?;
     Ok(user)
+}
+async fn upload_avatar(
+    State(state): State<AppState>,
+    claims: Claims,
+    mut multipart: Multipart,
+) -> Result<AvatarResponse, AppError> {
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|_| AppError::BadRequest)?
+    {
+        let field_name = field.name().unwrap_or("").to_string();
+
+        if field_name == "avatar" {
+            let bytes = field.bytes().await.map_err(|_| AppError::BadRequest)?;
+            let path = ProfileService::upload_avatar(&state, claims.sub, bytes).await?;
+            return Ok(AvatarResponse { path });
+        }
+    }
+
+    Err(AppError::BadRequest)
 }

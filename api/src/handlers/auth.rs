@@ -1,16 +1,13 @@
 use crate::{
     AppState,
     dtos::auth::{
-        LoginRequest, RefreshRequest, RefreshResponse, RegisterRequest, VerifyCodeRequest, VerifyCodeResponse
+        LoginRequest, RefreshRequest, RefreshResponse, RegisterRequest, VerifyCodeRequest,
+        VerifyCodeResponse,
     },
     error::AppError,
-    services::auth::AuthService, utils::security::Claims,
+    services::auth::AuthService,
 };
-use axum::{
-    Json, Router,
-    extract::State,
-    routing::post,
-};
+use axum::{Json, Router, extract::State, routing::post};
 
 pub fn auth_router() -> Router<AppState> {
     Router::new()
@@ -20,7 +17,10 @@ pub fn auth_router() -> Router<AppState> {
         .route("/refresh", post(refresh))
 }
 
-async fn login(State(state): State<AppState>, Json(payload): Json<LoginRequest>) -> Result<(), AppError> {
+async fn login(
+    State(state): State<AppState>,
+    Json(payload): Json<LoginRequest>,
+) -> Result<(), AppError> {
     AuthService::login(&state, payload.email).await
 }
 
