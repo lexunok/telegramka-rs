@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use chrono::{DateTime, Utc};
 use macros::IntoDataResponse;
 use sea_orm::{DerivePartialModel, prelude::Uuid};
@@ -12,4 +14,8 @@ pub struct UserDto {
     pub nickname: String,
     pub avatar_url: Option<String>,
     pub created_at: DateTime<Utc>,
+}
+#[derive(IntoDataResponse, Debug, Serialize)]
+pub struct AvatarResponse {
+    pub path: PathBuf,
 }
