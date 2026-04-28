@@ -15,6 +15,7 @@ use sea_orm::{
     prelude::{Uuid, *},
     sea_query::{Alias, Query, IntoCondition},
 };
+use std::cmp::min;
 
 pub struct ChatService;
 
@@ -126,19 +127,23 @@ impl ChatService {
         chat_id: Uuid,
         params: MessageQuery,
     ) -> Vec<MessageDto> {
+        let limit = min(params.limit.unwrap_or(50), 100);
+
         let mut query = Messages::find().filter(messages::Column::ChatId.eq(chat_id));
 
-        if let Some(cursor) = params.before {
-            query = query.filter(messages::Column::CreatedAt.lt(cursor));
+        if let Some(before) = params.before {
+            query = query.filter(messages::Column::CreatedAt.lt(before));
         }
 
-        let messages = query
-            .order_by_asc(messages::Column::CreatedAt)
-            .limit(params.limit)
+        let mut messages = query
+            .order_by_desc(messages::Column::CreatedAt)
+            .limit(limit)
             .into_model::<MessageDto>()
             .all(&state.conn)
             .await
             .unwrap_or_default();
+
+        messages.reverse();
 
         if params.before.is_none() && !messages.is_empty() {
             let _ = ChatMembers::update_many()

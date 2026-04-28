@@ -49,6 +49,7 @@ pub async fn init_app_state() -> anyhow::Result<AppState> {
 
 pub fn build_app(state: AppState) -> anyhow::Result<Router> {
     fs::create_dir_all(GLOBAL_CONFIG.avatar_path.clone())?;
+    fs::create_dir_all(GLOBAL_CONFIG.release_path.clone())?;
 
     Ok(Router::new()
         .route("/ws", get(ws::ws_handler))

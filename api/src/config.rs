@@ -14,6 +14,7 @@ pub static GLOBAL_CONFIG: LazyLock<Config> = LazyLock::new(|| {
     let encoding_key = EncodingKey::from_secret(secret.as_bytes());
     let decoding_key = DecodingKey::from_secret(secret.as_bytes());
     let avatar_path = env::var("AVATAR_PATH").expect("AVATAR_PATH must be set");
+    let release_path = env::var("RELEASE_PATH").expect("RELEASE_PATH must be set");
 
     Config {
         port,
@@ -25,6 +26,7 @@ pub static GLOBAL_CONFIG: LazyLock<Config> = LazyLock::new(|| {
         encoding_key,
         decoding_key,
         avatar_path,
+        release_path,
     }
 });
 
@@ -38,4 +40,5 @@ pub struct Config {
     pub encoding_key: EncodingKey,
     pub decoding_key: DecodingKey,
     pub avatar_path: String,
+    pub release_path: String,
 }

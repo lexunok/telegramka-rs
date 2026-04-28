@@ -28,6 +28,7 @@ tower-http = { version = "0.6.0", features = ["cors", "fs"] }
 image = "0.25.1"
 itertools = "0.14.0"
 futures-util = "0.3.32"
+uuid = { version = "1.13", features = ["v4", "fast-rng"] }
 
 
 [dependencies.sea-orm]

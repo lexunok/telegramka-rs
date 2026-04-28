@@ -26,8 +26,9 @@ impl ProfileService {
         user_id: Uuid,
         bytes: Bytes,
     ) -> Result<PathBuf, AppError> {
+        let id = Uuid::new_v4();
         let avatar_dir = PathBuf::from(&GLOBAL_CONFIG.avatar_path);
-        let file_path = avatar_dir.join(format!("{}.webp", user_id));
+        let file_path = avatar_dir.join(format!("{}.webp", id));
 
         let img = image::load_from_memory(&bytes)
             .map_err(|_| AppError::Custom("Ошибка при загрузке изображения".to_string()))?;
