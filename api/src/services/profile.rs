@@ -24,7 +24,7 @@ impl ProfileService {
     pub async fn upload_avatar(
         state: &AppState,
         user_id: Uuid,
-        bytes: Bytes,
+        bytes: Vec<u8>,
     ) -> Result<PathBuf, AppError> {
         let id = Uuid::new_v4();
         let avatar_dir = PathBuf::from(&GLOBAL_CONFIG.avatar_path);

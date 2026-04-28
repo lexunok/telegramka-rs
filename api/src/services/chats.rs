@@ -13,7 +13,7 @@ use sea_orm::{
     ColumnTrait, EntityTrait, ExprTrait, JoinType, QueryFilter, QueryOrder, QuerySelect,
     QueryTrait, RelationTrait, TransactionTrait,
     prelude::{Uuid, *},
-    sea_query::{Alias, Query, IntoCondition},
+    sea_query::{Alias, IntoCondition, Query},
 };
 use std::cmp::min;
 
@@ -27,54 +27,47 @@ impl ChatService {
         Chats::find()
             .join_as(
                 JoinType::InnerJoin,
-                chats::Relation::ChatMembers.def().on_condition(move |_left, right| {
-                    Expr::col((right, chat_members::Column::UserId))
-                        .eq(user_id)
-                        .into_condition()
-                }),
+                chats::Relation::ChatMembers
+                    .def()
+                    .on_condition(move |_left, right| {
+                        Expr::col((right, chat_members::Column::UserId))
+                            .eq(user_id)
+                            .into_condition()
+                    }),
                 me.clone(),
             )
             .join_as(
                 JoinType::InnerJoin,
-                chats::Relation::ChatMembers.def().on_condition(move |_left, right| {
+                chats::Relation::ChatMembers
+                    .def()
+                    .on_condition(move |_left, right| {
                         Expr::col((right, chat_members::Column::ChatId))
                             .eq(Expr::col((me.clone(), chat_members::Column::ChatId)))
                             .into_condition()
-                }),
+                    }),
                 other_member.clone(),
             )
             .join(
                 JoinType::InnerJoin,
-                chat_members::Relation::Users.def().from_alias(other_member.clone()).on_condition(move |_left, right| {
-                    Expr::col((right, users::Column::Id))
-                        .ne(user_id)
-                        .into_condition()
-                }),
+                chat_members::Relation::Users
+                    .def()
+                    .from_alias(other_member.clone())
+                    .on_condition(move |_left, right| {
+                        Expr::col((right, users::Column::Id))
+                            .ne(user_id)
+                            .into_condition()
+                    }),
             )
-
             .select_only()
             .column(chats::Column::Id)
-            .column_as(
-                users::Column::Name,
-                "name",
-            )
-            .column_as(
-                users::Column::Nickname,
-                "nickname",
-            )
-            .column_as(
-                users::Column::AvatarUrl,
-                "avatar_url",
-            )
-
+            .column_as(users::Column::Name, "name")
+            .column_as(users::Column::Nickname, "nickname")
+            .column_as(users::Column::AvatarUrl, "avatar_url")
             .expr_as(
                 Messages::find()
                     .select_only()
                     .column(messages::Column::Text)
-                    .filter(
-                        Expr::col(messages::Column::ChatId)
-                            .equals(chats::Column::Id),
-                    )
+                    .filter(Expr::col(messages::Column::ChatId).equals(chats::Column::Id))
                     .order_by_desc(messages::Column::CreatedAt)
                     .limit(1)
                     .into_query(),
@@ -84,10 +77,7 @@ impl ChatService {
                 Messages::find()
                     .select_only()
                     .column(messages::Column::CreatedAt)
-                    .filter(
-                        Expr::col(messages::Column::ChatId)
-                            .equals(chats::Column::Id),
-                    )
+                    .filter(Expr::col(messages::Column::ChatId).equals(chats::Column::Id))
                     .order_by_desc(messages::Column::CreatedAt)
                     .limit(1)
                     .into_query(),
@@ -97,21 +87,16 @@ impl ChatService {
                 Query::select()
                     .expr(Expr::col(messages::Column::Id).count())
                     .from(Messages)
-                    .and_where(
-                        Expr::col(messages::Column::ChatId)
-                            .equals(chats::Column::Id),
-                    )
-                    .and_where(
-                        Expr::cust(format!(
-                            "NOT EXISTS (
+                    .and_where(Expr::col(messages::Column::ChatId).equals(chats::Column::Id))
+                    .and_where(Expr::cust(format!(
+                        "NOT EXISTS (
                                 SELECT 1 FROM chat_members cm
                                 WHERE cm.chat_id = chats.id
                                 AND cm.user_id = '{}'
                                 AND cm.last_read_at >= messages.created_at
                             )",
-                            user_id
-                        )),
-                    )
+                        user_id
+                    )))
                     .to_owned(),
                 "unread",
             )
@@ -128,7 +113,7 @@ impl ChatService {
         params: MessageQuery,
     ) -> Vec<MessageDto> {
         let limit = min(params.limit.unwrap_or(50), 100);
-
+        // Нужна еще проверка что я есть в чате
         let mut query = Messages::find().filter(messages::Column::ChatId.eq(chat_id));
 
         if let Some(before) = params.before {
@@ -165,11 +150,8 @@ impl ChatService {
         let chat_id = ChatMembers::find()
             .select_only()
             .column(chat_members::Column::ChatId)
-            .filter(
-                chat_members::Column::UserId
-                    .is_in(vec![sender_id, payload.chat_id])
-                    .or(chat_members::Column::ChatId.eq(payload.chat_id)),
-            )
+            .filter(chat_members::Column::ChatId.eq(payload.chat_id))
+            // .filter(chat_members::Column::UserId.is_in(vec![sender_id, payload.user_id]))
             .group_by(chat_members::Column::ChatId)
             .into_tuple::<Uuid>()
             .one(&state.conn)
@@ -238,7 +220,7 @@ impl ChatService {
         txn.commit().await?;
 
         //Пока только персональные чаты
-        let recipients: Vec<Uuid> = vec![payload.chat_id, sender_id];
+        let recipients: Vec<Uuid> = vec![chat_id, sender_id];
 
         let _ = state.tx.send(WsEvent::NewMessage {
             recipients,
