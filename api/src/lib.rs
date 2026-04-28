@@ -1,5 +1,5 @@
 use crate::{config::GLOBAL_CONFIG, dtos::messages::WsEvent, handlers::main_router};
-use axum::{Router, routing::get};
+use axum::{Router, extract::DefaultBodyLimit, routing::get};
 use migration::{Migrator, MigratorTrait};
 use sea_orm::{Database, DatabaseConnection};
 use std::fs;
@@ -54,5 +54,6 @@ pub fn build_app(state: AppState) -> anyhow::Result<Router> {
     Ok(Router::new()
         .route("/ws", get(ws::ws_handler))
         .nest("/api", main_router())
+        .layer(DefaultBodyLimit::max(1024 * 1024 * 10))
         .with_state(state))
 }
