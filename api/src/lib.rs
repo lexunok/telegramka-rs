@@ -1,9 +1,10 @@
-use crate::{config::GLOBAL_CONFIG, dtos::messages::WsEvent, handlers::main_router};
+use crate::{config::GLOBAL_CONFIG, dtos::messages::WsEnvelope, handlers::main_router};
 use axum::{Router, extract::DefaultBodyLimit, routing::get};
 use migration::{Migrator, MigratorTrait};
 use sea_orm::{Database, DatabaseConnection};
-use std::fs;
-use tokio::sync::broadcast;
+use std::{collections::HashMap, fs, sync::Arc};
+use tokio::sync::{RwLock, broadcast};
+use sea_orm::prelude::Uuid;
 
 mod config;
 mod dtos;
@@ -35,16 +36,22 @@ pub async fn start() -> anyhow::Result<()> {
 #[derive(Clone)]
 pub struct AppState {
     conn: DatabaseConnection,
-    tx: broadcast::Sender<WsEvent>,
+    tx: broadcast::Sender<WsEnvelope>,
+    online_users: Arc<RwLock<HashMap<Uuid, usize>>>,
 }
 
 pub async fn init_app_state() -> anyhow::Result<AppState> {
     let conn = Database::connect(GLOBAL_CONFIG.db_url.to_owned()).await?;
     let (tx, _) = tokio::sync::broadcast::channel(1000);
+    let online_users = Arc::new(RwLock::new(HashMap::new()));
 
     Migrator::up(&conn, None).await?;
 
-    Ok(AppState { conn, tx })
+    Ok(AppState {
+        conn,
+        tx,
+        online_users,
+    })
 }
 
 pub fn build_app(state: AppState) -> anyhow::Result<Router> {

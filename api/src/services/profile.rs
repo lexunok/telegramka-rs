@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use crate::{AppState, config::GLOBAL_CONFIG, dtos::users::UserDto, error::AppError};
-use axum::body::Bytes;
 use entity::{prelude::*, users};
 use image::ImageFormat;
 use sea_orm::{

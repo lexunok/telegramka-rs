@@ -19,16 +19,39 @@ pub struct MessageQuery {
 }
 #[derive(Debug, Deserialize)]
 pub struct SendMessageRequest {
-    pub chat_id: Uuid,
+    pub chat_id: Option<Uuid>,
+    pub user_id: Option<Uuid>,
     pub id: Uuid,
     pub text: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum WsEvent {
-    NewMessage {
-        recipients: Vec<Uuid>,
-        message: MessageDto,
+    NewMessage { message: MessageDto },
+    PresenceSnapshot { user_ids: Vec<Uuid> },
+    UserPresence { user_id: Uuid, online: bool },
+    Typing {
+        chat_id: Uuid,
+        user_id: Uuid,
+        typing: bool,
     },
-    Typing,
+    Read {
+        chat_id: Uuid,
+        user_id: Uuid,
+        read_at: DateTime<Utc>,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum WsClientEvent {
+    Typing { chat_id: Uuid, typing: bool },
+    MarkRead { chat_id: Uuid },
+}
+
+#[derive(Debug, Clone)]
+pub struct WsEnvelope {
+    pub recipients: Option<Vec<Uuid>>,
+    pub event: WsEvent,
 }

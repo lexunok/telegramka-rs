@@ -30,24 +30,18 @@ async fn upload_avatar(
     claims: Claims,
     mut multipart: Multipart,
 ) -> Result<AvatarResponse, AppError> {
-    println!("Uploading avatar");
     while let Some(field) = multipart
         .next_field()
         .await
         .map_err(|_| AppError::BadRequest)?
     {
         let field_name = field.name().unwrap_or("").to_string();
-        println!("Field Name: {}", field_name);
 
         if field_name == "avatar" {
-            // let bytes = field.bytes().await.map_err(|_| AppError::BadRequest)?;
             let mut data = Vec::new();
             let mut stream = field;
-            println!("Reading stream");
             while let Some(chunk) = stream.next().await {
-                println!("Reading chunk");
-                let chunk = chunk.map_err(|e| {
-                    println!("Chunk error: {}", e);
+                let chunk = chunk.map_err(|_| {
                     AppError::BadRequest
                 })?;
                 data.extend_from_slice(&chunk);

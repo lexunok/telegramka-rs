@@ -2,18 +2,14 @@ use crate::{
     AppState,
     dtos::{
         chats::ChatResponse,
-        messages::{MessageDto, MessageQuery, SendMessageRequest, WsEvent},
+        messages::{MessageDto, MessageQuery, SendMessageRequest, WsEnvelope, WsEvent},
     },
     error::AppError,
 };
 use chrono::Utc;
 use entity::{chat_members, chats, messages, prelude::*, users};
 use sea_orm::{
-    ActiveValue::Set,
-    ColumnTrait, EntityTrait, ExprTrait, JoinType, QueryFilter, QueryOrder, QuerySelect,
-    QueryTrait, RelationTrait, TransactionTrait,
-    prelude::{Uuid, *},
-    sea_query::{Alias, IntoCondition, Query},
+    ActiveValue::Set, ColumnTrait, Condition, EntityTrait, ExprTrait, JoinType, QueryFilter, QueryOrder, QuerySelect, QueryTrait, RelationTrait, TransactionTrait, prelude::{Uuid, *}, sea_query::{Alias,Func, IntoCondition, Query}
 };
 use std::cmp::min;
 
@@ -23,6 +19,7 @@ impl ChatService {
     pub async fn list_chats(state: &AppState, user_id: Uuid) -> Vec<ChatResponse> {
         let me = Alias::new("me");
         let other_member = Alias::new("other_member");
+        let m = Alias::new("m");
 
         Chats::find()
             .join_as(
@@ -58,48 +55,64 @@ impl ChatService {
                             .into_condition()
                     }),
             )
+            .join_as(
+                JoinType::LeftJoin,
+                chats::Relation::Messages.def(),
+                m.clone(),
+            )
             .select_only()
             .column(chats::Column::Id)
+            .column_as(users::Column::Id, "user_id")
             .column_as(users::Column::Name, "name")
             .column_as(users::Column::Nickname, "nickname")
             .column_as(users::Column::AvatarUrl, "avatar_url")
             .expr_as(
-                Messages::find()
-                    .select_only()
+                Query::select()
                     .column(messages::Column::Text)
-                    .filter(Expr::col(messages::Column::ChatId).equals(chats::Column::Id))
-                    .order_by_desc(messages::Column::CreatedAt)
+                    .from(Messages)
+                    .and_where(
+                        Expr::col(messages::Column::ChatId)
+                            .eq(Expr::cust("chats.id"))       
+                    )
+                    .order_by(messages::Column::CreatedAt, sea_orm::Order::Desc)
                     .limit(1)
-                    .into_query(),
+                    .to_owned(),
                 "last_message",
             )
             .expr_as(
-                Messages::find()
-                    .select_only()
+                Query::select()
                     .column(messages::Column::CreatedAt)
-                    .filter(Expr::col(messages::Column::ChatId).equals(chats::Column::Id))
-                    .order_by_desc(messages::Column::CreatedAt)
+                    .from(Messages)
+                    .and_where(
+                        Expr::col(messages::Column::ChatId)
+                            .eq(Expr::cust("chats.id"))       
+                     )
+                    .order_by(messages::Column::CreatedAt, sea_orm::Order::Desc)
                     .limit(1)
-                    .into_query(),
+                    .to_owned(),
                 "last_message_time",
             )
             .expr_as(
-                Query::select()
-                    .expr(Expr::col(messages::Column::Id).count())
-                    .from(Messages)
-                    .and_where(Expr::col(messages::Column::ChatId).equals(chats::Column::Id))
-                    .and_where(Expr::cust(format!(
-                        "NOT EXISTS (
-                                SELECT 1 FROM chat_members cm
-                                WHERE cm.chat_id = chats.id
-                                AND cm.user_id = '{}'
-                                AND cm.last_read_at >= messages.created_at
-                            )",
-                        user_id
-                    )))
-                    .to_owned(),
+                Expr::expr(
+                    Func::sum(
+                        Expr::case(
+                            Condition::any()
+                                .add(
+                                    Expr::col((Alias::new("me"), chat_members::Column::LastReadAt)).is_null()
+                                )
+                                .add(
+                                    Expr::col((m.clone(), messages::Column::CreatedAt))
+                                        .gt(Expr::col((Alias::new("me"), chat_members::Column::LastReadAt)))
+                                ),
+                            1,
+                        )
+                        .finally(0)
+                    )
+                ),
                 "unread",
             )
+            .group_by(chats::Column::Id)
+            .group_by(users::Column::Id)
             .order_by_desc(Expr::col("last_message_time"))
             .into_model::<ChatResponse>()
             .all(&state.conn)
@@ -112,8 +125,24 @@ impl ChatService {
         chat_id: Uuid,
         params: MessageQuery,
     ) -> Vec<MessageDto> {
+
+        let chat_id = ChatMembers::find()
+            .select_only()
+            .column(chat_members::Column::ChatId)
+            .filter(chat_members::Column::ChatId.eq(chat_id))
+            .filter(chat_members::Column::UserId.eq(user_id))
+            .group_by(chat_members::Column::ChatId)
+            .into_tuple::<Uuid>()
+            .one(&state.conn)
+            .await;
+
+        let chat_id = match chat_id {
+            Ok(Some(id)) => id,
+            Ok(None) | Err(_) => return vec![],
+        };
+
         let limit = min(params.limit.unwrap_or(50), 100);
-        // Нужна еще проверка что я есть в чате
+
         let mut query = Messages::find().filter(messages::Column::ChatId.eq(chat_id));
 
         if let Some(before) = params.before {
@@ -131,37 +160,109 @@ impl ChatService {
         messages.reverse();
 
         if params.before.is_none() && !messages.is_empty() {
+            let read_at = Utc::now();
+
             let _ = ChatMembers::update_many()
-                .col_expr(chat_members::Column::LastReadAt, Expr::current_timestamp())
+                .col_expr(chat_members::Column::LastReadAt, Expr::value(read_at))
                 .filter(chat_members::Column::ChatId.eq(chat_id))
                 .filter(chat_members::Column::UserId.eq(user_id))
                 .exec(&state.conn)
                 .await;
+
+            if let Ok(recipients) = ChatMembers::find()
+                .filter(chat_members::Column::ChatId.eq(chat_id))
+                .select_only()
+                .column(chat_members::Column::UserId)
+                .into_tuple::<Uuid>()
+                .all(&state.conn)
+                .await
+            {
+                let _ = state.tx.send(WsEnvelope {
+                    recipients: Some(recipients),
+                    event: WsEvent::Read {
+                        chat_id,
+                        user_id,
+                        read_at,
+                    },
+                });
+            }
         }
 
         messages
+    }
+    pub async fn mark_read(state: &AppState, user_id: Uuid, chat_id: Uuid) -> bool {
+        let is_member = ChatMembers::find()
+            .select_only()
+            .column(chat_members::Column::ChatId)
+            .filter(chat_members::Column::ChatId.eq(chat_id))
+            .filter(chat_members::Column::UserId.eq(user_id))
+            .into_tuple::<Uuid>()
+            .one(&state.conn)
+            .await
+            .ok()
+            .flatten()
+            .is_some();
+
+        if !is_member {
+            return false;
+        }
+
+        let read_at = Utc::now();
+
+        if ChatMembers::update_many()
+            .col_expr(chat_members::Column::LastReadAt, Expr::value(read_at))
+            .filter(chat_members::Column::ChatId.eq(chat_id))
+            .filter(chat_members::Column::UserId.eq(user_id))
+            .exec(&state.conn)
+            .await
+            .is_err()
+        {
+            return false;
+        }
+
+        if let Ok(recipients) = ChatMembers::find()
+            .filter(chat_members::Column::ChatId.eq(chat_id))
+            .select_only()
+            .column(chat_members::Column::UserId)
+            .into_tuple::<Uuid>()
+            .all(&state.conn)
+            .await
+        {
+            let _ = state.tx.send(WsEnvelope {
+                recipients: Some(recipients),
+                event: WsEvent::Read {
+                    chat_id,
+                    user_id,
+                    read_at,
+                },
+            });
+        }
+
+        true
     }
     pub async fn send_message(
         state: &AppState,
         sender_id: Uuid,
         payload: SendMessageRequest,
     ) -> Result<MessageDto, AppError> {
-        // есть ли чат (только для персональных)
-        let chat_id = ChatMembers::find()
-            .select_only()
-            .column(chat_members::Column::ChatId)
-            .filter(chat_members::Column::ChatId.eq(payload.chat_id))
-            // .filter(chat_members::Column::UserId.is_in(vec![sender_id, payload.user_id]))
-            .group_by(chat_members::Column::ChatId)
-            .into_tuple::<Uuid>()
-            .one(&state.conn)
-            .await?;
 
         let txn = state.conn.begin().await?;
 
-        let chat_id = if let Some(chat_id) = chat_id {
-            chat_id
-        } else {
+        let chat_id = if let Some(chat_id) = payload.chat_id {
+            ChatMembers::find()
+                .select_only()
+                .column(chat_members::Column::ChatId)
+                .filter(chat_members::Column::ChatId.eq(chat_id))
+                .filter(chat_members::Column::UserId.eq(sender_id))
+                .group_by(chat_members::Column::ChatId)
+                .into_tuple::<Uuid>()
+                .one(&txn)
+                .await?
+                .ok_or(AppError::NotFound)?
+
+        } else if let Some(user_id) = payload.user_id {
+
+            // Чисто в теории можно создать дубликат чата, поэтому стоит сделать какую то проверку чтоль
             let chat = Chats::insert(chats::ActiveModel {
                 ..Default::default()
             })
@@ -180,38 +281,35 @@ impl ChatService {
 
             ChatMembers::insert(chat_members::ActiveModel {
                 chat_id: Set(chat_id),
-                user_id: Set(payload.chat_id),
+                user_id: Set(user_id),
                 ..Default::default()
             })
             .exec(&txn)
             .await?;
 
             chat_id
+        } else {
+            return Err(AppError::BadRequest);
         };
 
-        let message = Messages::insert(messages::ActiveModel {
+        let message: messages::Model = messages::ActiveModel {
             id: Set(payload.id),
             chat_id: Set(chat_id),
             sender_id: Set(sender_id),
             text: Set(payload.text.clone()),
             ..Default::default()
-        })
-        .exec(&txn)
-        .await?;
-
-        let message_id = message.last_insert_id;
-        let now = Utc::now();
+        }.insert(&txn).await?;
 
         let dto = MessageDto {
-            id: message_id,
+            id: message.id,
             chat_id,
             sender_id,
-            text: payload.text,
-            created_at: now,
+            text: message.text,
+            created_at: message.created_at.into(),
         };
 
         ChatMembers::update_many()
-            .col_expr(chat_members::Column::LastReadAt, Expr::value(now))
+            .col_expr(chat_members::Column::LastReadAt, Expr::value(dto.created_at))
             .filter(chat_members::Column::ChatId.eq(chat_id))
             .filter(chat_members::Column::UserId.eq(sender_id))
             .exec(&txn)
@@ -219,12 +317,19 @@ impl ChatService {
 
         txn.commit().await?;
 
-        //Пока только персональные чаты
-        let recipients: Vec<Uuid> = vec![chat_id, sender_id];
+        let recipients = ChatMembers::find()
+            .filter(chat_members::Column::ChatId.eq(chat_id))
+            .select_only()
+            .column(chat_members::Column::UserId)
+            .into_tuple::<Uuid>()
+            .all(&state.conn)
+            .await?;
 
-        let _ = state.tx.send(WsEvent::NewMessage {
-            recipients,
-            message: dto.clone(),
+        let _ = state.tx.send(WsEnvelope {
+            recipients: Some(recipients),
+            event: WsEvent::NewMessage {
+                message: dto.clone(),
+            },
         });
 
         Ok(dto)

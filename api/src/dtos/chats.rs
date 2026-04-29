@@ -5,6 +5,7 @@ use serde::Serialize;
 #[derive(Debug, Serialize, FromQueryResult)]
 pub struct ChatResponse {
     pub id: Uuid,
+    pub user_id: Uuid,
     pub name: String,
     pub nickname: String,
     pub last_message: Option<String>,
