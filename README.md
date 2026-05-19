@@ -75,3 +75,25 @@ cargo run -p migration -- fresh
 ```bash
 sea-orm-cli generate entity --output-dir ./entity/generated --lib --entity-format dense --with-serde both
 ```
+
+## Push-уведомления (FCM)
+
+### Переменные окружения
+
+- `FCM_SERVER_KEY` — ключ Firebase Cloud Messaging для отправки push (optional, если отсутствует — push не отправляются).
+- `FCM_ENDPOINT` — endpoint FCM (по умолчанию `https://fcm.googleapis.com/fcm/send`).
+
+### Пример payload
+
+```json
+{
+  "data": {
+    "chat_id": "...",
+    "user_id": "...",
+    "sender_name": "...",
+    "sender_nickname": "...",
+    "avatar_url": "...",
+    "text": "..."
+  }
+}
+```
