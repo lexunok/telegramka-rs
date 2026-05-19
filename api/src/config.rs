@@ -15,6 +15,9 @@ pub static GLOBAL_CONFIG: LazyLock<Config> = LazyLock::new(|| {
     let decoding_key = DecodingKey::from_secret(secret.as_bytes());
     let avatar_path = env::var("AVATAR_PATH").expect("AVATAR_PATH must be set");
     let release_path = env::var("RELEASE_PATH").expect("RELEASE_PATH must be set");
+    let fcm_server_key = env::var("FCM_SERVER_KEY").ok();
+    let fcm_endpoint =
+        env::var("FCM_ENDPOINT").unwrap_or("https://fcm.googleapis.com/fcm/send".to_string());
 
     Config {
         port,
@@ -27,6 +30,8 @@ pub static GLOBAL_CONFIG: LazyLock<Config> = LazyLock::new(|| {
         decoding_key,
         avatar_path,
         release_path,
+        fcm_server_key,
+        fcm_endpoint,
     }
 });
 
@@ -41,4 +46,6 @@ pub struct Config {
     pub decoding_key: DecodingKey,
     pub avatar_path: String,
     pub release_path: String,
+    pub fcm_server_key: Option<String>,
+    pub fcm_endpoint: String,
 }

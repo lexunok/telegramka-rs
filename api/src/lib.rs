@@ -1,10 +1,10 @@
 use crate::{config::GLOBAL_CONFIG, dtos::messages::WsEnvelope, handlers::main_router};
 use axum::{Router, extract::DefaultBodyLimit, routing::get};
 use migration::{Migrator, MigratorTrait};
+use sea_orm::prelude::Uuid;
 use sea_orm::{Database, DatabaseConnection};
 use std::{collections::HashMap, fs, sync::Arc};
 use tokio::sync::{RwLock, broadcast};
-use sea_orm::prelude::Uuid;
 
 mod config;
 mod dtos;

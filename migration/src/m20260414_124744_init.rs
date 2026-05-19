@@ -71,9 +71,7 @@ impl MigrationTrait for Migration {
                     .if_not_exists()
                     .col(ColumnDef::new(ChatMembers::ChatId).uuid().not_null())
                     .col(ColumnDef::new(ChatMembers::UserId).uuid().not_null())
-                    .col(
-                        ColumnDef::new(ChatMembers::LastReadAt).timestamp_with_time_zone(),
-                    )
+                    .col(ColumnDef::new(ChatMembers::LastReadAt).timestamp_with_time_zone())
                     .col(
                         ColumnDef::new(ChatMembers::CreatedAt)
                             .timestamp_with_time_zone()

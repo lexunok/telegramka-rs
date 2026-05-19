@@ -9,6 +9,7 @@ pub struct MessageDto {
     pub chat_id: Uuid,
     pub sender_id: Uuid,
     pub text: String,
+    pub device_id: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -23,14 +24,22 @@ pub struct SendMessageRequest {
     pub user_id: Option<Uuid>,
     pub id: Uuid,
     pub text: String,
+    pub device_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WsEvent {
-    NewMessage { message: MessageDto },
-    PresenceSnapshot { user_ids: Vec<Uuid> },
-    UserPresence { user_id: Uuid, online: bool },
+    NewMessage {
+        message: MessageDto,
+    },
+    PresenceSnapshot {
+        user_ids: Vec<Uuid>,
+    },
+    UserPresence {
+        user_id: Uuid,
+        online: bool,
+    },
     Typing {
         chat_id: Uuid,
         user_id: Uuid,

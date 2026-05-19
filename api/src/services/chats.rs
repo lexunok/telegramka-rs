@@ -9,7 +9,11 @@ use crate::{
 use chrono::Utc;
 use entity::{chat_members, chats, messages, prelude::*, users};
 use sea_orm::{
-    ActiveValue::Set, ColumnTrait, Condition, EntityTrait, ExprTrait, JoinType, QueryFilter, QueryOrder, QuerySelect, QueryTrait, RelationTrait, TransactionTrait, prelude::{Uuid, *}, sea_query::{Alias,Func, IntoCondition, Query}
+    ActiveValue::Set,
+    ColumnTrait, Condition, EntityTrait, ExprTrait, JoinType, QueryFilter, QueryOrder, QuerySelect,
+    QueryTrait, RelationTrait, TransactionTrait,
+    prelude::{Uuid, *},
+    sea_query::{Alias, Func, IntoCondition, Query},
 };
 use std::cmp::min;
 
@@ -70,10 +74,7 @@ impl ChatService {
                 Query::select()
                     .column(messages::Column::Text)
                     .from(Messages)
-                    .and_where(
-                        Expr::col(messages::Column::ChatId)
-                            .eq(Expr::cust("chats.id"))       
-                    )
+                    .and_where(Expr::col(messages::Column::ChatId).eq(Expr::cust("chats.id")))
                     .order_by(messages::Column::CreatedAt, sea_orm::Order::Desc)
                     .limit(1)
                     .to_owned(),
@@ -83,32 +84,27 @@ impl ChatService {
                 Query::select()
                     .column(messages::Column::CreatedAt)
                     .from(Messages)
-                    .and_where(
-                        Expr::col(messages::Column::ChatId)
-                            .eq(Expr::cust("chats.id"))       
-                     )
+                    .and_where(Expr::col(messages::Column::ChatId).eq(Expr::cust("chats.id")))
                     .order_by(messages::Column::CreatedAt, sea_orm::Order::Desc)
                     .limit(1)
                     .to_owned(),
                 "last_message_time",
             )
             .expr_as(
-                Expr::expr(
-                    Func::sum(
-                        Expr::case(
-                            Condition::any()
-                                .add(
-                                    Expr::col((Alias::new("me"), chat_members::Column::LastReadAt)).is_null()
-                                )
-                                .add(
-                                    Expr::col((m.clone(), messages::Column::CreatedAt))
-                                        .gt(Expr::col((Alias::new("me"), chat_members::Column::LastReadAt)))
-                                ),
-                            1,
-                        )
-                        .finally(0)
+                Expr::expr(Func::sum(
+                    Expr::case(
+                        Condition::any()
+                            .add(
+                                Expr::col((Alias::new("me"), chat_members::Column::LastReadAt))
+                                    .is_null(),
+                            )
+                            .add(Expr::col((m.clone(), messages::Column::CreatedAt)).gt(
+                                Expr::col((Alias::new("me"), chat_members::Column::LastReadAt)),
+                            )),
+                        1,
                     )
-                ),
+                    .finally(0),
+                )),
                 "unread",
             )
             .group_by(chats::Column::Id)
@@ -125,7 +121,6 @@ impl ChatService {
         chat_id: Uuid,
         params: MessageQuery,
     ) -> Vec<MessageDto> {
-
         let chat_id = ChatMembers::find()
             .select_only()
             .column(chat_members::Column::ChatId)
@@ -245,7 +240,6 @@ impl ChatService {
         sender_id: Uuid,
         payload: SendMessageRequest,
     ) -> Result<MessageDto, AppError> {
-
         let txn = state.conn.begin().await?;
 
         let chat_id = if let Some(chat_id) = payload.chat_id {
@@ -259,9 +253,7 @@ impl ChatService {
                 .one(&txn)
                 .await?
                 .ok_or(AppError::NotFound)?
-
         } else if let Some(user_id) = payload.user_id {
-
             // Чисто в теории можно создать дубликат чата, поэтому стоит сделать какую то проверку чтоль
             let chat = Chats::insert(chats::ActiveModel {
                 ..Default::default()
@@ -298,7 +290,9 @@ impl ChatService {
             sender_id: Set(sender_id),
             text: Set(payload.text.clone()),
             ..Default::default()
-        }.insert(&txn).await?;
+        }
+        .insert(&txn)
+        .await?;
 
         let dto = MessageDto {
             id: message.id,
@@ -309,7 +303,10 @@ impl ChatService {
         };
 
         ChatMembers::update_many()
-            .col_expr(chat_members::Column::LastReadAt, Expr::value(dto.created_at))
+            .col_expr(
+                chat_members::Column::LastReadAt,
+                Expr::value(dto.created_at),
+            )
             .filter(chat_members::Column::ChatId.eq(chat_id))
             .filter(chat_members::Column::UserId.eq(sender_id))
             .exec(&txn)
@@ -330,6 +327,18 @@ impl ChatService {
             event: WsEvent::NewMessage {
                 message: dto.clone(),
             },
+        });
+
+        let message_for_push = message.clone();
+        let sender_device_id = payload.device_id.clone();
+        let state_cloned = state.clone();
+        tokio::spawn(async move {
+            PushService::send_new_message_push(
+                &state_cloned,
+                &message_for_push,
+                sender_device_id.as_deref(),
+            )
+            .await;
         });
 
         Ok(dto)

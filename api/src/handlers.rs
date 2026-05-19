@@ -7,6 +7,7 @@ pub mod auth;
 pub mod chats;
 pub mod files;
 pub mod profile;
+pub mod push;
 pub mod users;
 
 pub fn main_router() -> Router<AppState> {
@@ -19,6 +20,7 @@ pub fn main_router() -> Router<AppState> {
         .nest("/users", users::users_router())
         .nest("/chats", chats::chats_router())
         .nest("/files", files::files_router())
+        .nest("/push", push::push_router())
         .nest_service("/images/avatars", ServeDir::new(avatar_dir))
         .nest_service("/release/download", ServeDir::new(releases_dir))
 }
