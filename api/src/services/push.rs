@@ -9,7 +9,7 @@ use entity::{
     chat_members,
     messages::Model as MessageModel,
     prelude::{ChatMembers, PushDevices, Users},
-    push_devices, users,
+    push_devices,
 };
 use sea_orm::prelude::Uuid;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};

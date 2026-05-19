@@ -9,7 +9,6 @@ pub struct MessageDto {
     pub chat_id: Uuid,
     pub sender_id: Uuid,
     pub text: String,
-    pub device_id: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
