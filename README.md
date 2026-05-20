@@ -80,8 +80,8 @@ sea-orm-cli generate entity --output-dir ./entity/generated --lib --entity-forma
 
 ### Переменные окружения
 
-- `FCM_SERVER_KEY` — ключ Firebase Cloud Messaging для отправки push (optional, если отсутствует — push не отправляются).
-- `FCM_ENDPOINT` — endpoint FCM (по умолчанию `https://fcm.googleapis.com/fcm/send`).
+- `FCM_PROJECT_ID` — Firebase project id (например `my-app-prod`). Если отсутствует, push-отправка отключается.
+- `FCM_SERVICE_ACCOUNT_PATH` — путь до JSON service account с правами на Firebase Cloud Messaging (HTTP v1).
 
 ### Пример payload
 

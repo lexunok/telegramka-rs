@@ -11,9 +11,9 @@ use entity::{
     prelude::{ChatMembers, PushDevices, Users},
     push_devices,
 };
+use google_fcm1 as fcm1;
 use sea_orm::prelude::Uuid;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
-use serde_json::json;
 
 pub struct PushService;
 
@@ -75,18 +75,48 @@ impl PushService {
         Ok(())
     }
 
+    async fn build_hub() -> Option<
+        fcm1::FirebaseCloudMessaging<
+            hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
+        >,
+    > {
+        let path = GLOBAL_CONFIG.fcm_service_account_path.as_ref()?;
+        let key = yup_oauth2::read_service_account_key(path).await.ok()?;
+        let auth = yup_oauth2::ServiceAccountAuthenticator::builder(key)
+            .build()
+            .await
+            .ok()?;
+        let client =
+            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+                .build(
+                    hyper_rustls::HttpsConnectorBuilder::new()
+                        .with_native_roots()
+                        .unwrap()
+                        .https_or_http()
+                        .enable_http1()
+                        .build(),
+                );
+        Some(fcm1::FirebaseCloudMessaging::new(client, auth))
+    }
+
     pub async fn send_new_message_push(
         state: &AppState,
         message: &MessageModel,
         sender_device_id: Option<&str>,
     ) {
-        let Some(server_key) = GLOBAL_CONFIG.fcm_server_key.as_ref() else {
+        let Some(project_id) = GLOBAL_CONFIG.fcm_project_id.as_ref() else {
             return;
         };
+        let Some(mut hub) = Self::build_hub().await else {
+            tracing::error!("fcm hub init failed");
+            return;
+        };
+
         let sender = match Users::find_by_id(message.sender_id).one(&state.conn).await {
             Ok(Some(s)) => s,
             _ => return,
         };
+
         let recipients = match ChatMembers::find()
             .filter(chat_members::Column::ChatId.eq(message.chat_id))
             .filter(chat_members::Column::UserId.ne(message.sender_id))
@@ -94,8 +124,12 @@ impl PushService {
             .await
         {
             Ok(v) => v,
-            Err(_) => return,
+            Err(e) => {
+                tracing::error!("push recipients query error: {e}");
+                return;
+            }
         };
+
         for recipient in recipients {
             let devices = match PushDevices::find()
                 .filter(push_devices::Column::UserId.eq(recipient.user_id))
@@ -106,39 +140,53 @@ impl PushService {
             {
                 Ok(v) => v,
                 Err(e) => {
-                    tracing::error!("push query error: {e}");
+                    tracing::error!("push devices query error: {e}");
                     continue;
                 }
             };
+
             for d in devices {
                 if sender_device_id.is_some_and(|id| id == d.device_id) {
                     continue;
                 }
-                let payload = json!({"to": d.fcm_token, "collapse_key": message.chat_id.to_string(), "data": {
-                    "chat_id": message.chat_id.to_string(),
-                    "user_id": message.sender_id.to_string(),
-                    "sender_name": sender.name,
-                    "sender_nickname": sender.nickname,
-                    "avatar_url": sender.avatar_url,
-                    "text": message.text,
-                }});
-                let resp = reqwest::Client::new()
-                    .post(&GLOBAL_CONFIG.fcm_endpoint)
-                    .bearer_auth(server_key)
-                    .json(&payload)
-                    .send()
-                    .await;
-                match resp {
-                    Ok(r) if r.status().is_success() => {}
-                    Ok(r) => {
-                        tracing::error!("fcm push failed status={} device={}", r.status(), d.id);
-                        if r.status().as_u16() == 404 || r.status().as_u16() == 410 {
-                            let mut m: push_devices::ActiveModel = d.into();
-                            m.is_active = Set(false);
-                            let _ = m.update(&state.conn).await;
+
+                let req = fcm1::api::SendMessageRequest {
+                    message: Some(fcm1::api::Message {
+                        token: Some(d.fcm_token.clone()),
+                        data: Some(std::collections::HashMap::from([
+                            ("chat_id".to_string(), message.chat_id.to_string()),
+                            ("user_id".to_string(), message.sender_id.to_string()),
+                            ("sender_name".to_string(), sender.name.clone()),
+                            ("sender_nickname".to_string(), sender.nickname.clone()),
+                            (
+                                "avatar_url".to_string(),
+                                sender.avatar_url.clone().unwrap_or_default(),
+                            ),
+                            ("text".to_string(), message.text.clone()),
+                        ])),
+                        android: Some(fcm1::api::AndroidConfig {
+                            collapse_key: Some(message.chat_id.to_string()),
+                            priority: Some("high".to_string()),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                    validate_only: Some(false),
+                };
+
+                let parent = format!("projects/{project_id}");
+                match hub.projects().messages_send(req, &parent).doit().await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        let err = format!("{e:?}");
+                        tracing::error!("fcm send error for device {}: {}", d.id, err);
+                        if err.contains("UNREGISTERED") || err.contains("INVALID_ARGUMENT") {
+                            let mut model: push_devices::ActiveModel = d.into();
+                            model.is_active = Set(false);
+                            model.updated_at = Set(Utc::now().into());
+                            let _ = model.update(&state.conn).await;
                         }
                     }
-                    Err(e) => tracing::error!("fcm send error: {e}"),
                 }
             }
         }
