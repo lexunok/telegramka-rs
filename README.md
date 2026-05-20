@@ -75,3 +75,25 @@ cargo run -p migration -- fresh
 ```bash
 sea-orm-cli generate entity --output-dir ./entity/generated --lib --entity-format dense --with-serde both
 ```
+
+## Push-уведомления (FCM)
+
+### Переменные окружения
+
+- `FCM_PROJECT_ID` — Firebase project id (например `my-app-prod`). Если отсутствует, push-отправка отключается.
+- `FCM_SERVICE_ACCOUNT_PATH` — путь до JSON service account с правами на Firebase Cloud Messaging (HTTP v1).
+
+### Пример payload
+
+```json
+{
+  "data": {
+    "chat_id": "...",
+    "user_id": "...",
+    "sender_name": "...",
+    "sender_nickname": "...",
+    "avatar_url": "...",
+    "text": "..."
+  }
+}
+```

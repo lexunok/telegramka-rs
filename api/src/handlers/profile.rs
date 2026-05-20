@@ -41,9 +41,7 @@ async fn upload_avatar(
             let mut data = Vec::new();
             let mut stream = field;
             while let Some(chunk) = stream.next().await {
-                let chunk = chunk.map_err(|_| {
-                    AppError::BadRequest
-                })?;
+                let chunk = chunk.map_err(|_| AppError::BadRequest)?;
                 data.extend_from_slice(&chunk);
             }
             let path = ProfileService::upload_avatar(&state, claims.sub, data).await?;

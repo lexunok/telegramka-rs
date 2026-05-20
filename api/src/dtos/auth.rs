@@ -13,7 +13,6 @@ pub struct LoginRequest {
     pub email: String,
 }
 
-
 #[derive(Debug, Deserialize)]
 pub struct VerifyCodeRequest {
     pub email: String,

@@ -1,8 +1,5 @@
 use crate::{
-    AppState,
-    dtos::files::FileVersionResponse,
-    error::AppError,
-    services::files::FilesService,
+    AppState, dtos::files::FileVersionResponse, error::AppError, services::files::FilesService,
 };
 use axum::{Router, routing::get};
 

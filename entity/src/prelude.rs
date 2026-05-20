@@ -3,5 +3,6 @@
 pub use super::chat_members::Entity as ChatMembers;
 pub use super::chats::Entity as Chats;
 pub use super::messages::Entity as Messages;
+pub use super::push_devices::Entity as PushDevices;
 pub use super::users::Entity as Users;
 pub use super::verification_codes::Entity as VerificationCodes;
