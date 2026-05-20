@@ -4,14 +4,14 @@ use crate::{
         chats::ChatResponse,
         messages::{MessageDto, MessageQuery, SendMessageRequest, WsEnvelope, WsEvent},
     },
-    error::AppError,
+    error::AppError, services::push::PushService,
 };
 use chrono::Utc;
 use entity::{chat_members, chats, messages, prelude::*, users};
 use sea_orm::{
     ActiveValue::Set,
     ColumnTrait, Condition, EntityTrait, ExprTrait, JoinType, QueryFilter, QueryOrder, QuerySelect,
-    QueryTrait, RelationTrait, TransactionTrait,
+    RelationTrait, TransactionTrait,
     prelude::{Uuid, *},
     sea_query::{Alias, Func, IntoCondition, Query},
 };
@@ -298,7 +298,7 @@ impl ChatService {
             id: message.id,
             chat_id,
             sender_id,
-            text: message.text,
+            text: message.text.clone(),
             created_at: message.created_at.into(),
         };
 
