@@ -35,7 +35,7 @@ yup-oauth2 = "11"
 hyper-util = "0.1"
 hyper-rustls = "0.27"
 http-body-util = "0.1"
-
+rustls = { version = "0.23", features = ["aws-lc-rs"] }
 
 [dependencies.sea-orm]
 version = "2.0.0-rc.37"

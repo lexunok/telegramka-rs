@@ -16,6 +16,8 @@ mod ws;
 
 #[tokio::main]
 pub async fn start() -> anyhow::Result<()> {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
         .init();
