@@ -1,10 +1,10 @@
 use crate::{config::GLOBAL_CONFIG, dtos::messages::WsEnvelope, handlers::main_router};
 use axum::{Router, extract::DefaultBodyLimit, routing::get};
 use migration::{Migrator, MigratorTrait};
+use sea_orm::prelude::Uuid;
 use sea_orm::{Database, DatabaseConnection};
 use std::{collections::HashMap, fs, sync::Arc};
 use tokio::sync::{RwLock, broadcast};
-use sea_orm::prelude::Uuid;
 
 mod config;
 mod dtos;
@@ -14,8 +14,13 @@ mod services;
 mod utils;
 mod ws;
 
+fn init_rustls_crypto_provider() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
+
 #[tokio::main]
 pub async fn start() -> anyhow::Result<()> {
+    init_rustls_crypto_provider();
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
         .init();

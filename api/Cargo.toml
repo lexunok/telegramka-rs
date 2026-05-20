@@ -30,6 +30,12 @@ itertools = "0.14.0"
 futures-util = "0.3.32"
 uuid = { version = "1.13", features = ["v4", "fast-rng"] }
 futures = "0.3.32"
+google-fcm1 = "6"
+yup-oauth2 = "11"
+hyper-util = "0.1"
+hyper-rustls = "0.27"
+rustls = { version = "0.23", features = ["aws-lc-rs"] }
+http-body-util = "0.1"
 
 
 [dependencies.sea-orm]

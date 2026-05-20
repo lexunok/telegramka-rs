@@ -15,7 +15,9 @@ use crate::{
 use argon2::password_hash::rand_core::{OsRng, RngCore};
 use chrono::{Duration, Utc};
 use entity::{prelude::*, users, verification_codes};
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, ExprTrait, IntoActiveModel, QueryFilter, QueryOrder,
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, ExprTrait, IntoActiveModel,
+    QueryFilter, QueryOrder,
 };
 
 pub struct AuthService;
@@ -36,17 +38,28 @@ impl AuthService {
     }
 
     pub async fn register(state: &AppState, payload: RegisterRequest) -> Result<(), AppError> {
-
         let res = Users::find()
-            .filter(users::Column::Email.eq(&payload.email.to_lowercase()).or(users::Column::Nickname.eq(&payload.nickname)))
+            .filter(
+                users::Column::Email
+                    .eq(&payload.email.to_lowercase())
+                    .or(users::Column::Nickname.eq(&payload.nickname)),
+            )
             .one(&state.conn)
             .await?;
 
         if let Some(_) = res {
-            return Err(AppError::Custom("Пользователь с таким email или nickname уже существует!".to_string()))
+            return Err(AppError::Custom(
+                "Пользователь с таким email или nickname уже существует!".to_string(),
+            ));
         }
 
-        Self::issue_verification_code(state, payload.email.to_lowercase(), Some(payload.name), Some(payload.nickname)).await?;
+        Self::issue_verification_code(
+            state,
+            payload.email.to_lowercase(),
+            Some(payload.name),
+            Some(payload.nickname),
+        )
+        .await?;
 
         Ok(())
     }
@@ -82,7 +95,7 @@ impl AuthService {
                 ..Default::default()
             };
             user.insert(&state.conn).await?;
-        } 
+        }
 
         let user: UserDto = Users::find()
             .filter(users::Column::Email.eq(email))
@@ -125,7 +138,12 @@ impl AuthService {
         })
     }
 
-    async fn issue_verification_code(state: &AppState, email: String, name: Option<String>, nickname: Option<String>) -> Result<(), AppError> {
+    async fn issue_verification_code(
+        state: &AppState,
+        email: String,
+        name: Option<String>,
+        nickname: Option<String>,
+    ) -> Result<(), AppError> {
         let mut rng = OsRng;
         let random_u32 = rng.next_u32();
         let code = (100_000 + (random_u32 % 900_000)).to_string();

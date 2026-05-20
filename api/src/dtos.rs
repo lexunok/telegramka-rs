@@ -4,3 +4,5 @@ pub mod files;
 pub mod messages;
 pub mod smtp;
 pub mod users;
+
+pub mod push;

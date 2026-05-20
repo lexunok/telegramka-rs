@@ -5,5 +5,6 @@ pub mod prelude;
 pub mod chat_members;
 pub mod chats;
 pub mod messages;
+pub mod push_devices;
 pub mod users;
 pub mod verification_codes;

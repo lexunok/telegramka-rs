@@ -20,6 +20,8 @@ pub struct Model {
     pub messages: HasMany<super::messages::Entity>,
     #[sea_orm(has_many, via = "chat_members")]
     pub chats: HasMany<super::chats::Entity>,
+    #[sea_orm(has_many)]
+    pub push_devices: HasMany<super::push_devices::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
